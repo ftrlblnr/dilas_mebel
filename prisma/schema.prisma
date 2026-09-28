@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+}
+
+enum LeadSource {
+  CALLBACK
+  QUICK_CALLBACK
+  CUSTOM_ORDER
+}
+
+enum LeadStatus {
+  NEW
+  IN_PROGRESS
+  DONE
+  CANCELED
+}
+
+model User {
+  id                        String         @id @default(cuid())
+  email                     String         @unique
+  passwordHash              String
+  name                      String
+  role                      Role           @default(MANAGER)
+  active                    Boolean        @default(true)
+  telegramChatId            String?        @unique
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+  notes                     LeadNote[]
+  assignedLeads             Lead[]
+  activities                LeadActivity[]
+}
+
+model Lead {
+  id            String     @id @default(cuid())
+  refNumber     String     @unique
+  source        LeadSource
+  fullName      String
+  phone         String
+  email         String?
+  city          String?
+  comment       String?
+  preferredTime String?
+  itemsJson     String     @default("[]")
+  totalPrice    Int        @default(0)
+  status        LeadStatus @default(NEW)
+  assignedToId  String?
+  assignedTo    User?      @relation(fields: [assignedToId], references: [id])
+  archivedAt    DateTime?
+  overdueNotifiedAt DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  notes         LeadNote[]
+  activities    LeadActivity[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@index([assignedToId])
+  @@index([archivedAt])
+}
+
+model LeadNote {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  text      String
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+}
+
+model LeadActivity {
+  id        String   @id @default(cuid())
+  leadId    String
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  field     String
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+}

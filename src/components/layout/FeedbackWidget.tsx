@@ -1,9 +1,7 @@
 "use client";
 import { useState } from "react";
 import { X, Phone, User, Loader2, CheckCircle } from "lucide-react";
-
-const WHATSAPP_NUMBER = "77056567733";
-const WHATSAPP_URL = `https://wa.me/${WHATSAPP_NUMBER}`;
+import { COMPANY_WHATSAPP_URL as WHATSAPP_URL } from "@/lib/constants";
 
 type Step = "menu" | "call-form" | "call-success";
 

@@ -16,8 +16,9 @@ export default function ConditionalChrome({
 }) {
   const pathname = usePathname();
   const isMiniApp = pathname?.startsWith("/miniapp");
+  const isPublicQuote = pathname?.startsWith("/q/");
 
-  if (isMiniApp) return <>{children}</>;
+  if (isMiniApp || isPublicQuote) return <>{children}</>;
 
   return (
     <>

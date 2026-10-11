@@ -167,9 +167,13 @@
   white-space: nowrap;
 }
 .ma-badge-NEW { background: #dbeafe; color: #1d4ed8; }
-.ma-badge-IN_PROGRESS { background: #fef3c7; color: #b45309; }
-.ma-badge-DONE { background: #dcfce7; color: #15803d; }
-.ma-badge-CANCELED { background: #fee2e2; color: #b91c1c; }
+.ma-badge-NEEDS_ASSESSMENT { background: #cffafe; color: #0e7490; }
+.ma-badge-FURNITURE_SELECTION { background: #ede9fe; color: #6d28d9; }
+.ma-badge-QUOTE_SENT { background: #e0e7ff; color: #4338ca; }
+.ma-badge-NEGOTIATION { background: #ffedd5; color: #c2410c; }
+.ma-badge-AWAITING_PAYMENT { background: #fef3c7; color: #b45309; }
+.ma-badge-WON { background: #dcfce7; color: #15803d; }
+.ma-badge-LOST { background: #fee2e2; color: #b91c1c; }
 
 .ma-dot {
   width: 6px;
@@ -178,9 +182,13 @@
   flex-shrink: 0;
 }
 .ma-dot-NEW { background: #1d4ed8; }
-.ma-dot-IN_PROGRESS { background: #b45309; }
-.ma-dot-DONE { background: #15803d; }
-.ma-dot-CANCELED { background: #b91c1c; }
+.ma-dot-NEEDS_ASSESSMENT { background: #0e7490; }
+.ma-dot-FURNITURE_SELECTION { background: #6d28d9; }
+.ma-dot-QUOTE_SENT { background: #4338ca; }
+.ma-dot-NEGOTIATION { background: #c2410c; }
+.ma-dot-AWAITING_PAYMENT { background: #b45309; }
+.ma-dot-WON { background: #15803d; }
+.ma-dot-LOST { background: #b91c1c; }
 
 .ma-badge-source-CALLBACK { background: #e0f2fe; color: #0369a1; }
 .ma-badge-source-QUICK_CALLBACK { background: #ccfbf1; color: #0f766e; }

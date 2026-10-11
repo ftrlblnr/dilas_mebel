@@ -1,4 +1,4 @@
-import type { LeadStatus, LeadSource } from "@prisma/client";
+import type { LeadStatus, LeadSource, TaskType, PaymentMethod, OrderAgreementStatus, TransferStatus } from "@prisma/client";
 
 export interface MiniLeadNote {
   id: string;
@@ -18,6 +18,35 @@ export interface MiniLeadActivity {
   newValue: string | null;
   createdAt: string;
   user: { name: string };
+}
+
+export interface MiniTask {
+  id: string;
+  type: TaskType;
+  dueAt: string;
+  completedAt: string | null;
+  result: string | null;
+  assignedTo: { name: string };
+}
+
+export interface MiniPayment {
+  id: string;
+  amount: number;
+  method: PaymentMethod;
+  status: "PENDING_REVIEW" | "CONFIRMED" | "REJECTED";
+  rejectedReason: string | null;
+  refunds: { amount: number }[];
+}
+
+export interface MiniOrder {
+  id: string;
+  amount: number;
+  discountPercent: number;
+  agreementStatus: OrderAgreementStatus;
+  transferStatus: TransferStatus;
+  approvalRequired: boolean;
+  approvedAt: string | null;
+  payments: MiniPayment[];
 }
 
 export interface MiniLead {
@@ -40,6 +69,8 @@ export interface MiniLead {
   updatedAt: string;
   notes: MiniLeadNote[];
   activities: MiniLeadActivity[];
+  customer: { id: string; fullName: string; phone: string };
+  tasks: MiniTask[];
 }
 
 export interface AssignableUser {

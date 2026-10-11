@@ -1,3 +1,7 @@
+export const COMPANY_WHATSAPP_NUMBER = "77056567733";
+export const COMPANY_WHATSAPP_URL = `https://wa.me/${COMPANY_WHATSAPP_NUMBER}`;
+export const COMPANY_EMAIL = "dilas_group@mail.ru";
+
 export const TRUST_BADGES = [
   { icon: "🚚", title: "Бесплатная доставка", subtitle: "от 150 000 ₸" },
   { icon: "🔄", title: "Лёгкий возврат", subtitle: "в течение 14 дней" },

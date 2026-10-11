@@ -2,15 +2,22 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, Check, ExternalLink, MessageCircle, Phone, ShoppingBag, Settings2 } from "lucide-react";
-import type { LeadStatus, LeadSource } from "@prisma/client";
-import { STATUS_LABEL, STATUS_OPTIONS, SOURCE_LABEL } from "@/lib/lead-labels";
+import type { LeadStatus, LeadSource, TaskType, PaymentMethod } from "@prisma/client";
+import { STATUS_LABEL, STATUS_OPTIONS, SOURCE_LABEL, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS } from "@/lib/lead-labels";
+import {
+  AGREEMENT_STATUS_LABEL,
+  TRANSFER_STATUS_LABEL,
+  PAYMENT_METHOD_LABEL,
+  PAYMENT_METHOD_OPTIONS,
+  PAYMENT_STATUS_LABEL,
+} from "@/lib/order-labels";
 
 const SOURCE_ICON: Record<LeadSource, typeof Phone> = {
   CALLBACK: ShoppingBag,
   QUICK_CALLBACK: Phone,
   CUSTOM_ORDER: Settings2,
 };
-import { parseLeadItems, type MiniLead, type AssignableUser } from "@/lib/miniapp-types";
+import { parseLeadItems, type MiniLead, type MiniOrder, type AssignableUser } from "@/lib/miniapp-types";
 import {
   useTelegramBackButton,
   useTelegramMainButton,
@@ -27,6 +34,16 @@ const ACTIVITY_FIELD_LABEL: Record<string, string> = {
 
 function digitsOnly(phone: string) {
   return phone.replace(/\D/g, "");
+}
+
+function orderRemaining(order: MiniOrder): number {
+  let net = 0;
+  for (const p of order.payments) {
+    if (p.status !== "CONFIRMED") continue;
+    net += p.amount;
+    for (const r of p.refunds) net -= r.amount;
+  }
+  return order.amount - net;
 }
 
 function initials(name: string): string {
@@ -52,6 +69,16 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
   const [savingNote, setSavingNote] = useState(false);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [taskType, setTaskType] = useState<TaskType>("CALL");
+  const [taskAssignee, setTaskAssignee] = useState("");
+  const [taskDue, setTaskDue] = useState("");
+  const [postingTask, setPostingTask] = useState(false);
+  const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
+  const [order, setOrder] = useState<MiniOrder | null | undefined>(undefined);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("CASH");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [postingPayment, setPostingPayment] = useState(false);
 
   const loadLead = useCallback(async () => {
     const res = await fetch(`/api/crm/leads/${leadId}`);
@@ -59,8 +86,14 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
     setLoading(false);
   }, [leadId]);
 
+  const loadOrder = useCallback(async () => {
+    const res = await fetch(`/api/crm/leads/${leadId}/order`);
+    if (res.ok) setOrder(await res.json());
+  }, [leadId]);
+
   useEffect(() => {
     loadLead();
+    loadOrder();
     fetch("/api/crm/users/assignable")
       .then((r) => r.json())
       .then(setUsers);
@@ -113,6 +146,54 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
     if (res.ok) {
       hapticImpact("light");
       loadLead();
+    }
+  }
+
+  async function handleAddTask() {
+    if (!taskAssignee || !taskDue || postingTask) return;
+    setPostingTask(true);
+    const res = await fetch(`/api/crm/leads/${leadId}/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: taskType, assignedToId: taskAssignee, dueAt: new Date(taskDue).toISOString() }),
+    });
+    setPostingTask(false);
+    if (res.ok) {
+      setTaskDue("");
+      hapticNotification("success");
+      loadLead();
+    }
+  }
+
+  async function handleToggleTask(taskId: string, completed: boolean) {
+    setSavingTaskId(taskId);
+    const res = await fetch(`/api/crm/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ completed }),
+    });
+    setSavingTaskId(null);
+    if (res.ok) {
+      hapticImpact("light");
+      loadLead();
+    }
+  }
+
+  async function handleSubmitPayment() {
+    const amount = Number(paymentAmount);
+    if (!order || !Number.isFinite(amount) || amount <= 0 || postingPayment) return;
+    setPostingPayment(true);
+    const res = await fetch(`/api/crm/orders/${order.id}/payments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount, method: paymentMethod, note: paymentNote || undefined }),
+    });
+    setPostingPayment(false);
+    if (res.ok) {
+      setPaymentAmount("");
+      setPaymentNote("");
+      hapticNotification("success");
+      loadOrder();
     }
   }
 
@@ -196,6 +277,7 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
             </div>
           )}
           <span className="ma-row-sub block mt-2">Создана {formatDateTime(lead.createdAt)}</span>
+          <span className="ma-row-sub block mt-1">Клиент: {lead.customer.fullName}</span>
         </div>
 
         {(() => {
@@ -290,6 +372,125 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
             ))}
           </div>
         </div>
+      </div>
+
+      <p className="ma-section-title">Задачи</p>
+      <div className="px-4 flex flex-col gap-2">
+        {lead.tasks.length === 0 && <p className="ma-hint text-sm">Нет задач</p>}
+        {lead.tasks.map((task) => (
+          <div key={task.id} className="ma-note flex items-start gap-2">
+            <input
+              type="checkbox"
+              checked={!!task.completedAt}
+              disabled={savingTaskId === task.id}
+              onChange={(e) => handleToggleTask(task.id, e.target.checked)}
+              className="mt-1"
+            />
+            <div className="min-w-0 flex-1">
+              <p className={`ma-text text-sm ${task.completedAt ? "line-through" : ""}`}>
+                {TASK_TYPE_LABEL[task.type]} — {task.assignedTo.name}
+              </p>
+              <p className="ma-hint text-xs">
+                Срок: {formatDateTime(task.dueAt)}
+                {task.result && <> · {task.result}</>}
+              </p>
+            </div>
+          </div>
+        ))}
+        <div className="flex flex-col gap-2 mt-1">
+          <select value={taskType} onChange={(e) => setTaskType(e.target.value as TaskType)} className="ma-input">
+            {TASK_TYPE_OPTIONS.map((t) => (
+              <option key={t} value={t}>{TASK_TYPE_LABEL[t]}</option>
+            ))}
+          </select>
+          <select value={taskAssignee} onChange={(e) => setTaskAssignee(e.target.value)} className="ma-input">
+            <option value="">Кому назначить...</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+          </select>
+          <input type="datetime-local" value={taskDue} onChange={(e) => setTaskDue(e.target.value)} className="ma-input" />
+          <button
+            type="button"
+            onClick={handleAddTask}
+            disabled={!taskAssignee || !taskDue || postingTask}
+            className="ma-button-primary"
+          >
+            Добавить задачу
+          </button>
+        </div>
+      </div>
+
+      <p className="ma-section-title">Заказ</p>
+      <div className="px-4 flex flex-col gap-2">
+        {order === undefined ? (
+          <p className="ma-hint text-sm">Загрузка...</p>
+        ) : order === null ? (
+          <p className="ma-hint text-sm">Заказ ещё не создан</p>
+        ) : (
+          <>
+            <div className="ma-card flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <span className="ma-row-title">{formatPrice(order.amount)}</span>
+                <span className="ma-hint text-xs">{AGREEMENT_STATUS_LABEL[order.agreementStatus]}</span>
+              </div>
+              {order.discountPercent > 0 && <span className="ma-row-sub">Скидка {order.discountPercent}%</span>}
+              <span className="ma-row-sub">Передача: {TRANSFER_STATUS_LABEL[order.transferStatus]}</span>
+              {(() => {
+                const remaining = orderRemaining(order);
+                return (
+                  <span className={`ma-row-sub ${remaining > 0 ? "" : remaining < 0 ? "text-red-500" : ""}`}>
+                    {remaining > 0 ? `Остаток: ${formatPrice(remaining)}` : remaining < 0 ? `Переплата: ${formatPrice(-remaining)}` : "Оплачено полностью"}
+                  </span>
+                );
+              })()}
+            </div>
+
+            {order.payments.map((p) => (
+              <div key={p.id} className="ma-note flex items-center justify-between">
+                <span className="ma-text text-sm">{formatPrice(p.amount)} · {PAYMENT_METHOD_LABEL[p.method]}</span>
+                <span
+                  className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                  style={{
+                    background: p.status === "CONFIRMED" ? "#dcfce7" : p.status === "REJECTED" ? "#fee2e2" : "#fef3c7",
+                    color: p.status === "CONFIRMED" ? "#15803d" : p.status === "REJECTED" ? "#b91c1c" : "#b45309",
+                  }}
+                >
+                  {PAYMENT_STATUS_LABEL[p.status]}
+                </span>
+              </div>
+            ))}
+
+            <div className="flex flex-col gap-2 mt-1">
+              <input
+                type="number"
+                placeholder="Сумма платежа"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                className="ma-input"
+              />
+              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)} className="ma-input">
+                {PAYMENT_METHOD_OPTIONS.map((m) => (
+                  <option key={m} value={m}>{PAYMENT_METHOD_LABEL[m]}</option>
+                ))}
+              </select>
+              <input
+                placeholder="Примечание"
+                value={paymentNote}
+                onChange={(e) => setPaymentNote(e.target.value)}
+                className="ma-input"
+              />
+              <button
+                type="button"
+                onClick={handleSubmitPayment}
+                disabled={!paymentAmount || postingPayment}
+                className="ma-button-primary"
+              >
+                Отправить на проверку
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       <p className="ma-section-title">Заметки</p>

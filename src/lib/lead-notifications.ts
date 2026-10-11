@@ -67,3 +67,39 @@ export async function notifyOverdueLeads(): Promise<number> {
 
   return overdueLeads.length;
 }
+
+const TASK_ESCALATION_HOURS = 24;
+
+export async function notifyOverdueTasks(): Promise<{ remindedCount: number; escalatedCount: number }> {
+  const now = new Date();
+
+  const toRemind = await prisma.task.findMany({
+    where: { completedAt: null, dueAt: { lte: now }, overdueNotifiedAt: null },
+    include: { lead: { select: { refNumber: true, fullName: true } }, assignedTo: { select: { telegramChatId: true } } },
+  });
+  for (const task of toRemind) {
+    if (task.assignedTo.telegramChatId) {
+      const text = `Просрочена задача по заявке ${task.lead.refNumber} (${task.lead.fullName})\nСрок: ${task.dueAt.toLocaleString("ru-RU")}`;
+      await sendManagerMessage(task.assignedTo.telegramChatId, text);
+    }
+  }
+  if (toRemind.length > 0) {
+    await prisma.task.updateMany({ where: { id: { in: toRemind.map((t) => t.id) } }, data: { overdueNotifiedAt: now } });
+  }
+
+  const escalationThreshold = new Date(now.getTime() - TASK_ESCALATION_HOURS * 60 * 60 * 1000);
+  const toEscalate = await prisma.task.findMany({
+    where: { completedAt: null, escalatedAt: null, dueAt: { lte: escalationThreshold } },
+    include: { lead: { select: { refNumber: true, fullName: true } }, assignedTo: { select: { name: true } } },
+  });
+  if (toEscalate.length > 0) {
+    const admins = await prisma.user.findMany({ where: { role: "ADMIN", telegramChatId: { not: null } }, select: { telegramChatId: true } });
+    for (const task of toEscalate) {
+      const text = `Задача просрочена более ${TASK_ESCALATION_HOURS}ч и всё ещё не выполнена\nЗаявка ${task.lead.refNumber} (${task.lead.fullName})\nИсполнитель: ${task.assignedTo.name}`;
+      await Promise.all(admins.map((a) => sendManagerMessage(a.telegramChatId!, text)));
+    }
+    await prisma.task.updateMany({ where: { id: { in: toEscalate.map((t) => t.id) } }, data: { escalatedAt: now } });
+  }
+
+  return { remindedCount: toRemind.length, escalatedCount: toEscalate.length };
+}

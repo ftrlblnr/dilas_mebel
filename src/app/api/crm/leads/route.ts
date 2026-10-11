@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
       status: (sp.get("status") as LeadStatus) || undefined,
       source: (sp.get("source") as LeadSource) || undefined,
       assignedToId: sp.get("assignedToId") || undefined,
+      customerId: sp.get("customerId") || undefined,
       search: sp.get("search") || undefined,
       dateFrom: sp.get("dateFrom") ? new Date(sp.get("dateFrom")!) : undefined,
       dateTo: sp.get("dateTo") ? new Date(sp.get("dateTo")!) : undefined,

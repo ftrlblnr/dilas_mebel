@@ -5,7 +5,16 @@ import { bulkUpdateLeads } from "@/lib/leads-server";
 
 const patchSchema = z.object({
   ids: z.array(z.string()).min(1),
-  status: z.enum(["NEW", "IN_PROGRESS", "DONE", "CANCELED"]).optional(),
+  status: z.enum([
+    "NEW",
+    "NEEDS_ASSESSMENT",
+    "FURNITURE_SELECTION",
+    "QUOTE_SENT",
+    "NEGOTIATION",
+    "AWAITING_PAYMENT",
+    "WON",
+    "LOST",
+  ]).optional(),
   assignedToId: z.string().nullable().optional(),
 });
 
@@ -20,6 +29,10 @@ export async function PATCH(req: NextRequest) {
   }
 
   const { ids, ...data } = parsed.data;
-  const count = await bulkUpdateLeads(ids, data, session.user.id, session.user.role ?? "MANAGER");
-  return NextResponse.json({ count });
+  try {
+    const count = await bulkUpdateLeads(ids, data, session.user.id, session.user.role ?? "MANAGER");
+    return NextResponse.json({ count });
+  } catch (err) {
+    return NextResponse.json({ message: err instanceof Error ? err.message : "Не удалось обновить заявки" }, { status: 400 });
+  }
 }

@@ -14,7 +14,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 const patchSchema = z.object({
-  status: z.enum(["NEW", "IN_PROGRESS", "DONE", "CANCELED"]).optional(),
+  status: z.enum([
+    "NEW",
+    "NEEDS_ASSESSMENT",
+    "FURNITURE_SELECTION",
+    "QUOTE_SENT",
+    "NEGOTIATION",
+    "AWAITING_PAYMENT",
+    "WON",
+    "LOST",
+  ]).optional(),
   assignedToId: z.string().nullable().optional(),
   archived: z.boolean().optional(),
   fullName: z.string().trim().min(1).optional(),
@@ -23,6 +32,8 @@ const patchSchema = z.object({
   city: z.string().trim().nullable().optional(),
   comment: z.string().trim().nullable().optional(),
   preferredTime: z.string().trim().nullable().optional(),
+  lostReason: z.enum(["PRICE", "TIMELINE", "COMPETITOR", "CHANGED_MIND", "OTHER"]).optional(),
+  lostReasonNote: z.string().trim().max(500).nullable().optional(),
 });
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -36,10 +47,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ message: "Некорректные данные" }, { status: 400 });
   }
 
+  // Known validation errors thrown by updateLead() that should surface to the
+  // user as-is — anything else (missing lead, scope mismatch, Prisma errors)
+  // falls back to the generic 404 this endpoint always returned before.
+  const KNOWN_VALIDATION_ERRORS = ["Укажите причину отказа"];
+
   try {
     const lead = await updateLead(id, parsed.data, session.user.id, session.user.role ?? "MANAGER");
     return NextResponse.json(lead);
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && KNOWN_VALIDATION_ERRORS.includes(err.message)) {
+      return NextResponse.json({ message: err.message }, { status: 400 });
+    }
     return NextResponse.json({ message: "Заявка не найдена" }, { status: 404 });
   }
 }

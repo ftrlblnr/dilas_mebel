@@ -1,29 +1,16 @@
-import { LayoutDashboard } from "lucide-react";
-import { cn } from "@/lib/utils";
+import Link from "next/link";
+import { LayoutDashboard, ListChecks } from "lucide-react";
+import { cn, formatPrice } from "@/lib/utils";
 import type { LeadStats } from "@/lib/leads-server";
+import type { MyOpenTask } from "@/lib/tasks-server";
 import type { LeadStatus, LeadSource } from "@prisma/client";
+import { STATUS_LABEL, STATUS_STYLE, SOURCE_LABEL, TASK_TYPE_LABEL, LOST_REASON_LABEL } from "@/lib/lead-labels";
 
-const STATUS_LABEL: Record<LeadStatus, string> = {
-  NEW: "Новая",
-  IN_PROGRESS: "В работе",
-  DONE: "Завершена",
-  CANCELED: "Отменена",
-};
+function formatDate(d: Date | string) {
+  return new Date(d).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
 
-const STATUS_STYLE: Record<LeadStatus, string> = {
-  NEW: "bg-blue-100 text-blue-700",
-  IN_PROGRESS: "bg-amber-100 text-amber-700",
-  DONE: "bg-green-100 text-green-700",
-  CANCELED: "bg-red-100 text-red-600",
-};
-
-const SOURCE_LABEL: Record<LeadSource, string> = {
-  CALLBACK: "Заказ",
-  QUICK_CALLBACK: "Обратный звонок",
-  CUSTOM_ORDER: "Инд. заказ",
-};
-
-function StatCard({ label, value, className }: { label: string; value: number; className?: string }) {
+function StatCard({ label, value, className }: { label: string; value: React.ReactNode; className?: string }) {
   return (
     <div className={cn("card p-4", className)}>
       <p className="text-xs text-text-muted mb-1">{label}</p>
@@ -32,7 +19,17 @@ function StatCard({ label, value, className }: { label: string; value: number; c
   );
 }
 
-export default function Dashboard({ stats }: { stats: LeadStats }) {
+export default function Dashboard({
+  stats,
+  myTasks,
+  averageWonOrderAmount,
+  isAdmin,
+}: {
+  stats: LeadStats;
+  myTasks: MyOpenTask[];
+  averageWonOrderAmount: number | null;
+  isAdmin: boolean;
+}) {
   return (
     <div>
       <h1 className="font-display font-bold text-xl text-text mb-6 flex items-center gap-2">
@@ -43,7 +40,28 @@ export default function Dashboard({ stats }: { stats: LeadStats }) {
         <StatCard label="Всего заявок" value={stats.total} />
         <StatCard label="Не назначено" value={stats.unassigned} />
         <StatCard label="Просрочено (2ч+)" value={stats.overdue} className={stats.overdue > 0 ? "ring-1 ring-red-300" : ""} />
-        <StatCard label="В работе" value={stats.byStatus.IN_PROGRESS} />
+        <StatCard
+          label="В работе"
+          value={
+            stats.byStatus.NEEDS_ASSESSMENT +
+            stats.byStatus.FURNITURE_SELECTION +
+            stats.byStatus.QUOTE_SENT +
+            stats.byStatus.NEGOTIATION +
+            stats.byStatus.AWAITING_PAYMENT
+          }
+        />
+      </div>
+
+      <div className={cn("grid grid-cols-2 gap-4 mb-6", isAdmin ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+        <StatCard label="Конверсия" value={stats.conversionRate !== null ? `${Math.round(stats.conversionRate * 100)}%` : "—"} />
+        <StatCard label="Средний чек" value={averageWonOrderAmount !== null ? formatPrice(averageWonOrderAmount) : "—"} />
+        {isAdmin && (
+          <StatCard
+            label="Просроченные задачи"
+            value={stats.overdueTasks}
+            className={stats.overdueTasks > 0 ? "ring-1 ring-red-300" : ""}
+          />
+        )}
       </div>
 
       <div className="grid sm:grid-cols-2 gap-4 mb-6">
@@ -72,8 +90,44 @@ export default function Dashboard({ stats }: { stats: LeadStats }) {
         </div>
       </div>
 
+      {stats.lossReasons.length > 0 && (
+        <div className="card p-4 mb-6">
+          <p className="text-xs text-text-muted mb-3 font-semibold">Причины потерь</p>
+          <div className="space-y-2">
+            {stats.lossReasons.map((lr) => (
+              <div key={lr.reason} className="flex items-center justify-between text-sm">
+                <span className="text-text-muted">{LOST_REASON_LABEL[lr.reason]}</span>
+                <span className="font-semibold text-text">{lr.count}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="card p-4 mb-6">
+        <p className="text-xs text-text-muted mb-3 font-semibold flex items-center gap-1.5">
+          <ListChecks size={14} /> Мои открытые задачи
+        </p>
+        {myTasks.length === 0 ? (
+          <p className="text-xs text-text-muted">Нет открытых задач</p>
+        ) : (
+          <div className="space-y-2">
+            {myTasks.map((t) => (
+              <Link
+                key={t.id}
+                href={`/crm?search=${encodeURIComponent(t.lead.refNumber)}`}
+                className="flex items-center justify-between text-sm bg-white border border-border rounded-lg px-3 py-2 hover:border-primary/40"
+              >
+                <span className="text-text">{TASK_TYPE_LABEL[t.type]} — {t.lead.fullName}</span>
+                <span className="text-xs text-text-muted whitespace-nowrap">до {formatDate(t.dueAt)}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="card p-4">
-        <p className="text-xs text-text-muted mb-3 font-semibold">Нагрузка по менеджерам (новые + в работе)</p>
+        <p className="text-xs text-text-muted mb-3 font-semibold">Нагрузка по менеджерам (активные сделки)</p>
         {stats.managerLoad.length === 0 ? (
           <p className="text-xs text-text-muted">Нет активных менеджеров</p>
         ) : (

@@ -1,0 +1,32 @@
+import { notFound } from "next/navigation";
+import { auth } from "@/lib/auth";
+import { getLeadById } from "@/lib/leads-server";
+import { getOrderForLead } from "@/lib/orders-server";
+import { getQuoteForLead } from "@/lib/quotes-server";
+import { listAssignableUsers } from "@/lib/users-server";
+import LeadDetail from "@/components/crm/LeadDetail";
+
+export default async function CrmLeadPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const session = await auth();
+  const actor = { id: session?.user?.id ?? "", role: session?.user?.role ?? ("MANAGER" as const) };
+
+  const [lead, order, quote, assignableUsers] = await Promise.all([
+    getLeadById(id, actor),
+    getOrderForLead(id, actor),
+    getQuoteForLead(id, actor),
+    listAssignableUsers(),
+  ]);
+  if (!lead) notFound();
+
+  return (
+    <LeadDetail
+      lead={lead}
+      order={order}
+      quote={quote}
+      assignableUsers={assignableUsers}
+      currentUserId={actor.id}
+      currentUserRole={session?.user?.role}
+    />
+  );
+}

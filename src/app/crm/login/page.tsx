@@ -29,7 +29,7 @@ export default function CrmLoginPage() {
       setError("Неверный email или пароль");
       return;
     }
-    router.push("/crm");
+    router.push("/crm/today");
     router.refresh();
   };
 

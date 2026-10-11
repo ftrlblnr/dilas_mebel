@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Script from "next/script";
-import { LogOut, ClipboardList, Users, Settings, LayoutDashboard } from "lucide-react";
+import { LogOut, ClipboardList, Users, Settings, LayoutDashboard, CalendarCheck, MessageCircle } from "lucide-react";
 import { auth, signOut } from "@/lib/auth";
 import TelegramWebAppInit from "@/components/crm/TelegramWebAppInit";
 
@@ -33,11 +33,17 @@ export default async function CrmLayout({ children }: { children: React.ReactNod
             <span className="text-blue-200 text-xs ml-2">CRM</span>
           </div>
           <nav className="flex items-center gap-1 ml-6">
+            <Link href="/crm/today" className="flex items-center gap-1.5 text-blue-100 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
+              <CalendarCheck size={15} /> Сегодня
+            </Link>
             <Link href="/crm" className="flex items-center gap-1.5 text-blue-100 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
               <ClipboardList size={15} /> Заявки
             </Link>
             <Link href="/crm/dashboard" className="flex items-center gap-1.5 text-blue-100 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
               <LayoutDashboard size={15} /> Дашборд
+            </Link>
+            <Link href="/crm/messages" className="flex items-center gap-1.5 text-blue-100 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
+              <MessageCircle size={15} /> Переписки
             </Link>
             {isAdmin && (
               <Link href="/crm/users" className="flex items-center gap-1.5 text-blue-100 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">

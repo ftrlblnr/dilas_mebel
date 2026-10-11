@@ -6,9 +6,19 @@ import { cn } from "@/lib/utils";
 import { useToast } from "@/components/providers/ToastProvider";
 import type { UserSummary } from "@/lib/users-server";
 
-export default function UsersManager({ users, currentUserId }: { users: UserSummary[]; currentUserId: string }) {
+export default function UsersManager({
+  users,
+  currentUserId,
+  managerDiscountLimitPercent,
+}: {
+  users: UserSummary[];
+  currentUserId: string;
+  managerDiscountLimitPercent: number;
+}) {
   const router = useRouter();
   const { showToast } = useToast();
+  const [discountLimit, setDiscountLimit] = useState(String(managerDiscountLimitPercent));
+  const [savingSettings, setSavingSettings] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -25,6 +35,29 @@ export default function UsersManager({ users, currentUserId }: { users: UserSumm
   const [resettingId, setResettingId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
   const [savingResetId, setSavingResetId] = useState<string | null>(null);
+
+  async function handleSaveSettings() {
+    const value = Number(discountLimit);
+    if (!Number.isFinite(value) || value < 0 || value > 100) {
+      showToast("Введите число от 0 до 100", "error");
+      return;
+    }
+    setSavingSettings(true);
+    try {
+      const res = await fetch("/api/crm/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ managerDiscountLimitPercent: value }),
+      });
+      if (!res.ok) throw new Error();
+      showToast("Настройки сохранены");
+      router.refresh();
+    } catch {
+      showToast("Не удалось сохранить настройки", "error");
+    } finally {
+      setSavingSettings(false);
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -143,6 +176,33 @@ export default function UsersManager({ users, currentUserId }: { users: UserSumm
 
   return (
     <div>
+      <div className="card p-5 mb-6 max-w-md">
+        <p className="font-semibold text-text text-sm mb-3">Настройки CRM</p>
+        <label className="text-sm text-text-muted mb-1.5 block">
+          Лимит скидки менеджера без согласования, %
+        </label>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={discountLimit}
+            onChange={(e) => setDiscountLimit(e.target.value)}
+            className="input-field text-sm w-24"
+          />
+          <button
+            onClick={handleSaveSettings}
+            disabled={savingSettings}
+            className="btn-primary px-4 py-2 text-sm disabled:opacity-60"
+          >
+            {savingSettings ? "Сохранение..." : "Сохранить"}
+          </button>
+        </div>
+        <p className="text-xs text-text-muted mt-2">
+          Скидка на заказе выше этого процента потребует согласования администратора.
+        </p>
+      </div>
+
       <div className="flex items-center justify-between mb-6">
         <h1 className="font-display font-bold text-xl text-text">Менеджеры</h1>
         <button onClick={() => setShowForm((v) => !v)} className="flex items-center gap-1.5 btn-primary py-2 px-4 text-sm">

@@ -19,9 +19,66 @@ enum LeadSource {
 
 enum LeadStatus {
   NEW
-  IN_PROGRESS
-  DONE
+  NEEDS_ASSESSMENT
+  FURNITURE_SELECTION
+  QUOTE_SENT
+  NEGOTIATION
+  AWAITING_PAYMENT
+  WON
+  LOST
+}
+
+enum TaskType {
+  CALL
+  MEETING
+  PREPARE_OFFER
+  SEND_OFFER
+  GET_DECISION
+  CHECK_PAYMENT
+  RESUME_POSTPONED
+  OTHER
+}
+
+enum OrderAgreementStatus {
+  DRAFT
+  ACCEPTED
   CANCELED
+}
+
+enum TransferStatus {
+  NOT_TRANSFERRED
+  TRANSFERRED
+  CONFIRMED_RECEIVED
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  BANK_TRANSFER
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING_REVIEW
+  CONFIRMED
+  REJECTED
+}
+
+enum QuoteVersionStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  EXPIRED
+  SUPERSEDED
+}
+
+enum LostReason {
+  PRICE
+  TIMELINE
+  COMPETITOR
+  CHANGED_MIND
+  OTHER
 }
 
 model User {
@@ -37,6 +94,27 @@ model User {
   notes                     LeadNote[]
   assignedLeads             Lead[]
   activities                LeadActivity[]
+  tasksAssigned             Task[]         @relation("TaskAssignee")
+  tasksAuthored             Task[]         @relation("TaskAuthor")
+  ordersCreated             SalesOrder[]   @relation("OrderCreator")
+  orderApprovals            SalesOrder[]   @relation("OrderApprover")
+  paymentsSubmitted         Payment[]      @relation("PaymentSubmitter")
+  paymentsConfirmed         Payment[]      @relation("PaymentConfirmer")
+  refundsCreated            Refund[]       @relation("RefundCreator")
+  quotesCreated             Quote[]        @relation("QuoteCreator")
+  quoteVersionsCreated      QuoteVersion[] @relation("QuoteVersionCreator")
+  quoteVersionApprovals     QuoteVersion[] @relation("QuoteVersionApprover")
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  fullName  String
+  email     String?
+  city      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  leads     Lead[]
 }
 
 model Lead {
@@ -52,6 +130,10 @@ model Lead {
   itemsJson     String     @default("[]")
   totalPrice    Int        @default(0)
   status        LeadStatus @default(NEW)
+  lostReason     LostReason?
+  lostReasonNote String?
+  customerId    String
+  customer      Customer   @relation(fields: [customerId], references: [id])
   assignedToId  String?
   assignedTo    User?      @relation(fields: [assignedToId], references: [id])
   archivedAt    DateTime?
@@ -60,11 +142,36 @@ model Lead {
   updatedAt     DateTime   @updatedAt
   notes         LeadNote[]
   activities    LeadActivity[]
+  tasks         Task[]
+  order         SalesOrder?
+  quote         Quote?
 
   @@index([status])
   @@index([createdAt])
   @@index([assignedToId])
   @@index([archivedAt])
+  @@index([customerId])
+}
+
+model Task {
+  id           String     @id @default(cuid())
+  leadId       String
+  lead         Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignedToId String
+  assignedTo   User       @relation("TaskAssignee", fields: [assignedToId], references: [id])
+  authorId     String
+  author       User       @relation("TaskAuthor", fields: [authorId], references: [id])
+  type         TaskType
+  dueAt        DateTime
+  completedAt  DateTime?
+  result       String?
+  overdueNotifiedAt DateTime?
+  escalatedAt       DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([leadId])
+  @@index([assignedToId, completedAt])
 }
 
 model LeadNote {
@@ -91,4 +198,132 @@ model LeadActivity {
   createdAt DateTime @default(now())
 
   @@index([leadId])
+}
+
+model SalesOrder {
+  id               String               @id @default(cuid())
+  leadId           String               @unique
+  lead             Lead                 @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  amount           Int
+  discountPercent  Int                  @default(0)
+  discountReason   String?
+  approvalRequired Boolean              @default(false)
+  approvedById     String?
+  approvedBy       User?                @relation("OrderApprover", fields: [approvedById], references: [id])
+  approvedAt       DateTime?
+  agreementStatus  OrderAgreementStatus @default(DRAFT)
+  transferStatus   TransferStatus       @default(NOT_TRANSFERRED)
+  createdById      String
+  createdBy        User                 @relation("OrderCreator", fields: [createdById], references: [id])
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  scheduleRows     PaymentScheduleRow[]
+  payments         Payment[]
+}
+
+model PaymentScheduleRow {
+  id        String     @id @default(cuid())
+  orderId   String
+  order     SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dueDate   DateTime
+  amount    Int
+  note      String?
+  createdAt DateTime   @default(now())
+
+  @@index([orderId])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  orderId        String
+  order          SalesOrder    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount         Int
+  method         PaymentMethod
+  externalRef    String?
+  note           String?
+  payerName      String?
+  status         PaymentStatus @default(PENDING_REVIEW)
+  submittedById  String
+  submittedBy    User          @relation("PaymentSubmitter", fields: [submittedById], references: [id])
+  confirmedById  String?
+  confirmedBy    User?         @relation("PaymentConfirmer", fields: [confirmedById], references: [id])
+  confirmedAt    DateTime?
+  rejectedReason String?
+  createdAt      DateTime      @default(now())
+  refunds        Refund[]
+
+  @@index([orderId])
+}
+
+model Refund {
+  id          String   @id @default(cuid())
+  paymentId   String
+  payment     Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  amount      Int
+  reason      String
+  createdById String
+  createdBy   User     @relation("RefundCreator", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@index([paymentId])
+}
+
+model CrmSettings {
+  id                          Int      @id @default(1)
+  managerDiscountLimitPercent Int      @default(10)
+  updatedAt                   DateTime @updatedAt
+}
+
+model Quote {
+  id          String         @id @default(cuid())
+  leadId      String         @unique
+  lead        Lead           @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User           @relation("QuoteCreator", fields: [createdById], references: [id])
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  versions    QuoteVersion[]
+}
+
+model QuoteVersion {
+  id               String             @id @default(cuid())
+  quoteId          String
+  quote            Quote              @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  versionNumber    Int
+  status           QuoteVersionStatus @default(DRAFT)
+  validUntil       DateTime?
+  publicToken      String             @unique
+  sentAt           DateTime?
+  viewedAt         DateTime?
+  acceptedAt       DateTime?
+  discountPercent  Int                @default(0)
+  discountReason   String?
+  approvalRequired Boolean            @default(false)
+  approvedById     String?
+  approvedBy       User?              @relation("QuoteVersionApprover", fields: [approvedById], references: [id])
+  approvedAt       DateTime?
+  createdById      String
+  createdBy        User               @relation("QuoteVersionCreator", fields: [createdById], references: [id])
+  createdAt        DateTime           @default(now())
+  items            QuoteVersionItem[]
+
+  @@index([quoteId])
+  @@index([publicToken])
+}
+
+model QuoteVersionItem {
+  id                  String       @id @default(cuid())
+  quoteVersionId      String
+  quoteVersion        QuoteVersion @relation(fields: [quoteVersionId], references: [id], onDelete: Cascade)
+  productId           String?
+  productName         String
+  productImage        String?
+  quantity            Int          @default(1)
+  unitPrice           Int
+  lineDiscountPercent Int          @default(0)
+  isManual            Boolean      @default(false)
+  description         String?
+  sortOrder           Int          @default(0)
+
+  @@index([quoteVersionId])
 }

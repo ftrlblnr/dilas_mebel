@@ -11,6 +11,7 @@ import BundleModal from "@/components/admin/BundleModal";
 import SlideFormModal from "@/components/admin/SlideFormModal";
 import type { HeroSlide } from "@/components/admin/SlideFormModal";
 import CategoriesManager from "@/components/admin/CategoriesManager";
+import { PREFERRED_TIME_LABEL } from "@/lib/lead-labels";
 import type { Product, CustomOrder } from "@/types";
 
 interface CallbackRecord {
@@ -25,12 +26,6 @@ interface CallbackRecord {
   estimatedTotal: number;
   itemsSummary: string;
 }
-
-const TIME_SHORT: Record<string, string> = {
-  morning: "Утром",
-  afternoon: "Днём",
-  evening: "Вечером",
-};
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<"products" | "categories" | "callbacks" | "custom-orders" | "slides" | "gallery" | "settings">("products");
@@ -452,7 +447,7 @@ export default function AdminDashboard() {
                         </td>
                         <td className="px-4 py-3">
                           <p className="font-semibold text-text">{cb.fullName}</p>
-                          <p className="text-text-muted text-xs">{TIME_SHORT[cb.preferredTime] || cb.preferredTime}</p>
+                          <p className="text-text-muted text-xs">{PREFERRED_TIME_LABEL[cb.preferredTime] || cb.preferredTime}</p>
                         </td>
                         <td className="px-4 py-3 text-text hidden md:table-cell">{cb.phone}</td>
                         <td className="px-4 py-3 text-text-muted hidden md:table-cell">{cb.city}</td>

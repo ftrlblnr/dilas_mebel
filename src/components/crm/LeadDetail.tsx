@@ -26,7 +26,7 @@ import type { OrderWithDetails } from "@/lib/orders-server";
 import type { QuoteWithVersions } from "@/lib/quotes-server";
 import type { LeadStatus, LeadSource, TaskType, PaymentMethod, LostReason } from "@prisma/client";
 import type { Product } from "@/types";
-import { STATUS_LABEL, STATUS_STYLE, STATUS_OPTIONS, SOURCE_LABEL, OVERDUE_HOURS, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, LOST_REASON_LABEL, LOST_REASON_OPTIONS } from "@/lib/lead-labels";
+import { STATUS_LABEL, STATUS_STYLE, STATUS_OPTIONS, SOURCE_LABEL, OVERDUE_HOURS, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, LOST_REASON_LABEL, LOST_REASON_OPTIONS, PREFERRED_TIME_LABEL } from "@/lib/lead-labels";
 import {
   AGREEMENT_STATUS_LABEL,
   TRANSFER_STATUS_LABEL,
@@ -145,9 +145,10 @@ interface Props {
   assignableUsers: { id: string; name: string }[];
   currentUserId: string;
   currentUserRole?: string;
+  backHref?: string;
 }
 
-export default function LeadDetail({ lead, order, quote, assignableUsers, currentUserId, currentUserRole }: Props) {
+export default function LeadDetail({ lead, order, quote, assignableUsers, currentUserId, currentUserRole, backHref }: Props) {
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -167,7 +168,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
   const [noteEditText, setNoteEditText] = useState("");
   const [savingNoteId, setSavingNoteId] = useState<string | null>(null);
 
-  const [taskDraft, setTaskDraft] = useState<TaskDraft>({ type: "CALL", assignedToId: currentUserId, dueAt: "" });
+  const [taskDraft, setTaskDraft] = useState<TaskDraft>({ type: "CALL", assignedToId: lead.assignedToId ?? currentUserId, dueAt: "" });
   const [postingTask, setPostingTask] = useState(false);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
 
@@ -177,6 +178,11 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
   const [paymentDraft, setPaymentDraft] = useState<PaymentDraft>({ amount: "", method: "CASH", externalRef: "", note: "" });
   const [postingPayment, setPostingPayment] = useState(false);
   const [savingPaymentId, setSavingPaymentId] = useState<string | null>(null);
+  const [rejectingPaymentId, setRejectingPaymentId] = useState<string | null>(null);
+  const [rejectReasonDraft, setRejectReasonDraft] = useState("");
+  const [refundingPaymentId, setRefundingPaymentId] = useState<string | null>(null);
+  const [refundAmountDraft, setRefundAmountDraft] = useState("");
+  const [refundReasonDraft, setRefundReasonDraft] = useState("");
 
   const [quoteBuilderOpen, setQuoteBuilderOpen] = useState(false);
   const [quoteLines, setQuoteLines] = useState<QuoteLineDraft[]>([]);
@@ -345,7 +351,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
         body: JSON.stringify({ ...taskDraft, dueAt: new Date(taskDraft.dueAt).toISOString() }),
       });
       if (!res.ok) throw new Error();
-      setTaskDraft({ type: "CALL", assignedToId: currentUserId, dueAt: "" });
+      setTaskDraft({ type: "CALL", assignedToId: lead.assignedToId ?? currentUserId, dueAt: "" });
       showToast("Задача создана");
       router.refresh();
     } catch {
@@ -482,12 +488,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
     }
   }
 
-  async function handlePaymentAction(paymentId: string, action: "confirm" | "reject") {
-    let reason: string | undefined;
-    if (action === "reject") {
-      reason = window.prompt("Причина отклонения:") ?? undefined;
-      if (reason === undefined) return;
-    }
+  async function handlePaymentAction(paymentId: string, action: "confirm" | "reject", reason?: string) {
     setSavingPaymentId(paymentId);
     try {
       const res = await fetch(`/api/crm/payments/${paymentId}`, {
@@ -506,23 +507,40 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
     }
   }
 
-  async function handleRefund(paymentId: string, maxAmount: number) {
-    const amountStr = window.prompt(`Сумма возврата (доступно: ${formatPrice(maxAmount)}):`);
-    if (!amountStr) return;
-    const amount = Number(amountStr);
+  function openRejectForm(paymentId: string) {
+    setRejectingPaymentId(paymentId);
+    setRejectReasonDraft("");
+  }
+
+  async function confirmReject(paymentId: string) {
+    await handlePaymentAction(paymentId, "reject", rejectReasonDraft || undefined);
+    setRejectingPaymentId(null);
+    setRejectReasonDraft("");
+  }
+
+  function openRefundForm(paymentId: string, maxAmount: number) {
+    setRefundingPaymentId(paymentId);
+    setRefundAmountDraft(String(maxAmount));
+    setRefundReasonDraft("");
+  }
+
+  async function confirmRefund(paymentId: string) {
+    const amount = Number(refundAmountDraft);
     if (!Number.isFinite(amount) || amount <= 0) return;
-    const reason = window.prompt("Причина возврата:");
-    if (!reason) return;
+    if (!refundReasonDraft.trim()) return;
     setSavingPaymentId(paymentId);
     try {
       const res = await fetch(`/api/crm/payments/${paymentId}/refund`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, reason }),
+        body: JSON.stringify({ amount, reason: refundReasonDraft }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message ?? "");
       showToast("Возврат оформлен");
+      setRefundingPaymentId(null);
+      setRefundAmountDraft("");
+      setRefundReasonDraft("");
       router.refresh();
     } catch (err) {
       showToast(err instanceof Error && err.message ? err.message : "Не удалось оформить возврат", "error");
@@ -562,7 +580,20 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
       setQuoteDiscountPercent(String(prefill.discountPercent));
       setQuoteDiscountReason(prefill.discountReason ?? "");
     } else {
-      setQuoteLines([]);
+      // Prefill from the lead's own priced catalog items (CALLBACK/QUICK_CALLBACK) so the
+      // manager doesn't have to re-pick what's already in the lead; CUSTOM_ORDER rows have
+      // no catalog productId/price and are naturally excluded (UX-12).
+      const priced = items.filter((i) => i.productId && typeof i.price === "number");
+      setQuoteLines(
+        priced.map((i) => ({
+          productId: i.productId,
+          productName: i.productName ?? "",
+          quantity: i.quantity ?? 1,
+          unitPrice: i.price ?? 0,
+          lineDiscountPercent: 0,
+          isManual: false,
+        }))
+      );
       setQuoteDiscountPercent("0");
       setQuoteDiscountReason("");
     }
@@ -634,7 +665,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message ?? "");
-      showToast("Предложение отправлено");
+      showToast("Отмечено как отправленное — скопируйте ссылку и отправьте клиенту");
       router.refresh();
     } catch (err) {
       showToast(err instanceof Error && err.message ? err.message : "Не удалось отправить предложение", "error");
@@ -677,7 +708,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
 
   return (
     <div>
-      <Link href="/crm" className="flex items-center gap-1.5 text-sm text-text-muted hover:text-primary mb-4">
+      <Link href={backHref ?? "/crm"} className="flex items-center gap-1.5 text-sm text-text-muted hover:text-primary mb-4">
         <ArrowLeft size={14} /> Назад к заявкам
       </Link>
 
@@ -765,7 +796,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
               </p>
               {lead.email && <p><span className="text-text-muted">Email: </span>{lead.email}</p>}
               {lead.city && <p><span className="text-text-muted">Город: </span>{lead.city}</p>}
-              {lead.preferredTime && <p><span className="text-text-muted">Время: </span>{lead.preferredTime}</p>}
+              {lead.preferredTime && <p><span className="text-text-muted">Время: </span>{PREFERRED_TIME_LABEL[lead.preferredTime] ?? lead.preferredTime}</p>}
               {lead.comment && <p><span className="text-text-muted">Комментарий: </span>{lead.comment}</p>}
               <p>
                 <span className="text-text-muted">Клиент: </span>
@@ -863,17 +894,21 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-muted">Ответственный:</span>
-            <select
-              value={lead.assignedToId ?? ""}
-              disabled={saving}
-              onChange={(e) => handleLeadUpdate({ assignedToId: e.target.value || null })}
-              className="input-field text-sm w-auto py-1.5"
-            >
-              <option value="">Не назначено</option>
-              {assignableUsers.map((u) => (
-                <option key={u.id} value={u.id}>{u.name}</option>
-              ))}
-            </select>
+            {isAdmin ? (
+              <select
+                value={lead.assignedToId ?? ""}
+                disabled={saving}
+                onChange={(e) => handleLeadUpdate({ assignedToId: e.target.value || null })}
+                className="input-field text-sm w-auto py-1.5"
+              >
+                <option value="">Не назначено</option>
+                {assignableUsers.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-sm text-text">{lead.assignedTo ? lead.assignedTo.name : "не назначено"}</span>
+            )}
           </div>
           {lead.status === "LOST" && lead.lostReason && (
             <span className="text-xs text-text-muted">
@@ -1124,7 +1159,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
                     Редактировать
                   </button>
                   <button onClick={() => handleSendQuote(latestQuoteVersion.id)} disabled={quoteActionId === latestQuoteVersion.id} className="btn-primary px-3 py-1.5 text-sm disabled:opacity-50">
-                    Отправить
+                    Отметить как отправленное
                   </button>
                 </>
               )}
@@ -1304,24 +1339,69 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
                       {p.refunds.length > 0 && (
                         <p className="text-xs text-red-600 mt-1">Возвраты: {p.refunds.map((r) => `${formatPrice(r.amount)} (${r.reason})`).join(", ")}</p>
                       )}
-                      {isAdmin && p.status === "PENDING_REVIEW" && (
+                      {isAdmin && p.status === "PENDING_REVIEW" && rejectingPaymentId !== p.id && (
                         <div className="flex gap-3 mt-1.5">
                           <button onClick={() => handlePaymentAction(p.id, "confirm")} disabled={savingPaymentId === p.id} className="text-xs text-primary font-semibold hover:underline disabled:opacity-50">
                             Подтвердить
                           </button>
-                          <button onClick={() => handlePaymentAction(p.id, "reject")} disabled={savingPaymentId === p.id} className="text-xs text-red-600 hover:underline disabled:opacity-50">
+                          <button onClick={() => openRejectForm(p.id)} disabled={savingPaymentId === p.id} className="text-xs text-red-600 hover:underline disabled:opacity-50">
                             Отклонить
                           </button>
                         </div>
                       )}
-                      {isAdmin && p.status === "CONFIRMED" && (
+                      {isAdmin && p.status === "PENDING_REVIEW" && rejectingPaymentId === p.id && (
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                          <input
+                            value={rejectReasonDraft}
+                            onChange={(e) => setRejectReasonDraft(e.target.value)}
+                            placeholder="Причина отклонения (необязательно)"
+                            className="input-field text-xs flex-1 min-w-[160px] py-1"
+                            autoFocus
+                          />
+                          <button onClick={() => confirmReject(p.id)} disabled={savingPaymentId === p.id} className="text-xs text-red-600 font-semibold hover:underline disabled:opacity-50">
+                            Подтвердить отклонение
+                          </button>
+                          <button onClick={() => setRejectingPaymentId(null)} className="text-xs text-text-muted hover:text-primary">
+                            Отмена
+                          </button>
+                        </div>
+                      )}
+                      {isAdmin && p.status === "CONFIRMED" && refundingPaymentId !== p.id && (
                         <button
-                          onClick={() => handleRefund(p.id, p.amount - p.refunds.reduce((s, r) => s + r.amount, 0))}
+                          onClick={() => openRefundForm(p.id, p.amount - p.refunds.reduce((s, r) => s + r.amount, 0))}
                           disabled={savingPaymentId === p.id}
                           className="text-xs text-text-muted hover:text-red-600 mt-1.5 disabled:opacity-50"
                         >
                           Оформить возврат
                         </button>
+                      )}
+                      {isAdmin && p.status === "CONFIRMED" && refundingPaymentId === p.id && (
+                        <div className="flex flex-wrap items-center gap-2 mt-1.5">
+                          <input
+                            type="number"
+                            value={refundAmountDraft}
+                            onChange={(e) => setRefundAmountDraft(e.target.value)}
+                            placeholder="Сумма возврата"
+                            className="input-field text-xs w-28 py-1"
+                            autoFocus
+                          />
+                          <input
+                            value={refundReasonDraft}
+                            onChange={(e) => setRefundReasonDraft(e.target.value)}
+                            placeholder="Причина возврата"
+                            className="input-field text-xs flex-1 min-w-[140px] py-1"
+                          />
+                          <button
+                            onClick={() => confirmRefund(p.id)}
+                            disabled={savingPaymentId === p.id || !refundAmountDraft || !refundReasonDraft.trim()}
+                            className="text-xs text-red-600 font-semibold hover:underline disabled:opacity-50"
+                          >
+                            Подтвердить возврат
+                          </button>
+                          <button onClick={() => setRefundingPaymentId(null)} className="text-xs text-text-muted hover:text-primary">
+                            Отмена
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))}

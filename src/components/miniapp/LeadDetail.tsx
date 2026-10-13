@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, Check, ExternalLink, MessageCircle, Phone, ShoppingBag, Settings2 } from "lucide-react";
 import type { LeadStatus, LeadSource, TaskType, PaymentMethod } from "@prisma/client";
-import { STATUS_LABEL, STATUS_OPTIONS, SOURCE_LABEL, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS } from "@/lib/lead-labels";
+import { STATUS_LABEL, STATUS_OPTIONS, SOURCE_LABEL, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, PREFERRED_TIME_LABEL } from "@/lib/lead-labels";
 import {
   AGREEMENT_STATUS_LABEL,
   TRANSFER_STATUS_LABEL,
@@ -272,7 +272,7 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
             <div className="flex flex-col gap-1 mt-3 pt-3" style={{ borderTop: "1px solid var(--ma-border)" }}>
               {lead.email && <span className="ma-row-sub">{lead.email}</span>}
               {lead.city && <span className="ma-row-sub">{lead.city}</span>}
-              {lead.preferredTime && <span className="ma-row-sub">Удобное время: {lead.preferredTime}</span>}
+              {lead.preferredTime && <span className="ma-row-sub">Удобное время: {PREFERRED_TIME_LABEL[lead.preferredTime] ?? lead.preferredTime}</span>}
               {lead.comment && <span className="ma-row-sub">{lead.comment}</span>}
             </div>
           )}

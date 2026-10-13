@@ -71,4 +71,10 @@ export const LOST_REASON_LABEL: Record<LostReason, string> = {
 
 export const LOST_REASON_OPTIONS: LostReason[] = ["PRICE", "TIMELINE", "COMPETITOR", "CHANGED_MIND", "OTHER"];
 
+export const PREFERRED_TIME_LABEL: Record<string, string> = {
+  morning: "Утром",
+  afternoon: "Днём",
+  evening: "Вечером",
+};
+
 export const OVERDUE_HOURS = 2;

@@ -6,8 +6,15 @@ import { getQuoteForLead } from "@/lib/quotes-server";
 import { listAssignableUsers } from "@/lib/users-server";
 import LeadDetail from "@/components/crm/LeadDetail";
 
-export default async function CrmLeadPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CrmLeadPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}) {
   const { id } = await params;
+  const sp = await searchParams;
   const session = await auth();
   const actor = { id: session?.user?.id ?? "", role: session?.user?.role ?? ("MANAGER" as const) };
 
@@ -19,6 +26,9 @@ export default async function CrmLeadPage({ params }: { params: Promise<{ id: st
   ]);
   if (!lead) notFound();
 
+  const backRaw = Array.isArray(sp.back) ? sp.back[0] : sp.back;
+  const backHref = backRaw && backRaw.startsWith("/crm") ? backRaw : undefined;
+
   return (
     <LeadDetail
       lead={lead}
@@ -27,6 +37,7 @@ export default async function CrmLeadPage({ params }: { params: Promise<{ id: st
       assignableUsers={assignableUsers}
       currentUserId={actor.id}
       currentUserRole={session?.user?.role}
+      backHref={backHref}
     />
   );
 }

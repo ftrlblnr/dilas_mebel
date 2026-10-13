@@ -639,7 +639,6 @@ export default function MessagesPrototype({ currentUserName, realLeads }: { curr
                 </div>
               )}
               <div className="pt-2 border-t border-border space-y-1.5">
-                <button className="btn-secondary w-full py-1.5 text-xs">Создать задачу</button>
                 {linkedLead ? (
                   <Link href={`/crm/leads/${linkedLead.id}`} className="btn-secondary w-full py-1.5 text-xs block text-center">
                     Открыть сделку

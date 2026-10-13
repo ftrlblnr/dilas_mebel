@@ -42,7 +42,7 @@ export default function CustomerDetail({ customer, leads }: { customer: Customer
             {leads.map((lead) => (
               <Link
                 key={lead.id}
-                href={`/crm?search=${encodeURIComponent(lead.refNumber)}`}
+                href={`/crm/leads/${lead.id}?back=${encodeURIComponent(`/crm/customers/${customer.id}`)}`}
                 className="flex items-center justify-between gap-3 text-sm bg-white border border-border rounded-lg px-3 py-2 hover:border-primary/40"
               >
                 <div className="min-w-0">

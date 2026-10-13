@@ -93,10 +93,10 @@ export interface LeadActor {
   role: "ADMIN" | "MANAGER";
 }
 
-/** MANAGER видит только свои + нераспределённые заявки; ADMIN — без ограничений (undefined). */
+/** MANAGER видит только свои заявки (нераспределённые назначает только ADMIN); ADMIN — без ограничений (undefined). */
 export function leadScopeCondition(actor?: LeadActor): Prisma.LeadWhereInput | undefined {
   if (actor?.role !== "MANAGER") return undefined;
-  return { OR: [{ assignedToId: actor.id }, { assignedToId: null }] };
+  return { assignedToId: actor.id };
 }
 
 export interface ListLeadsFilter {
@@ -193,7 +193,7 @@ export interface UpdateLeadInput {
 export async function getLeadById(id: string, actor?: LeadActor): Promise<LeadWithDetails | null> {
   const lead = await prisma.lead.findUnique({ where: { id }, include: LEAD_DETAIL_INCLUDE });
   if (!lead) return null;
-  if (actor?.role === "MANAGER" && lead.assignedToId !== null && lead.assignedToId !== actor.id) {
+  if (actor?.role === "MANAGER" && lead.assignedToId !== actor.id) {
     return null;
   }
   return lead;
@@ -202,8 +202,11 @@ export async function getLeadById(id: string, actor?: LeadActor): Promise<LeadWi
 export async function updateLead(id: string, input: UpdateLeadInput, actorId?: string, actorRole?: LeadActor["role"]): Promise<Lead> {
   if (actorRole === "MANAGER" && actorId) {
     const current = await prisma.lead.findUnique({ where: { id }, select: { assignedToId: true } });
-    if (!current || (current.assignedToId !== null && current.assignedToId !== actorId)) {
+    if (!current || current.assignedToId !== actorId) {
       throw new Error("Lead not found");
+    }
+    if (input.assignedToId !== undefined) {
+      throw new Error("Назначать заявки может только администратор");
     }
   }
 
@@ -275,10 +278,14 @@ export async function bulkUpdateLeads(
     throw new Error("Закрытие без продажи с указанием причины доступно только по одной заявке — откройте заявку и закройте её оттуда");
   }
 
+  if (actorRole === "MANAGER" && data.assignedToId !== undefined) {
+    throw new Error("Назначать заявки может только администратор");
+  }
+
   let scopedIds = ids;
   if (actorRole === "MANAGER" && actorId) {
     const allowed = await prisma.lead.findMany({
-      where: { id: { in: ids }, OR: [{ assignedToId: actorId }, { assignedToId: null }] },
+      where: { id: { in: ids }, assignedToId: actorId },
       select: { id: true },
     });
     scopedIds = allowed.map((l) => l.id);

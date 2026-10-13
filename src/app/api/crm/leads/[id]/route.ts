@@ -50,7 +50,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   // Known validation errors thrown by updateLead() that should surface to the
   // user as-is — anything else (missing lead, scope mismatch, Prisma errors)
   // falls back to the generic 404 this endpoint always returned before.
-  const KNOWN_VALIDATION_ERRORS = ["Укажите причину отказа"];
+  const KNOWN_VALIDATION_ERRORS = ["Укажите причину отказа", "Назначать заявки может только администратор"];
 
   try {
     const lead = await updateLead(id, parsed.data, session.user.id, session.user.role ?? "MANAGER");

@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ClipboardList, ChevronLeft, ChevronRight, Download, Search, AlarmClock, ShoppingBag, Settings2, Phone } from "lucide-react";
 import { formatPrice, cn } from "@/lib/utils";
@@ -70,6 +70,14 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
   const [bulkStatus, setBulkStatus] = useState("");
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [savingBulk, setSavingBulk] = useState(false);
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+
+  // Clear the selection whenever the visible list changes (new filters/page) so a
+  // stale selection can't silently apply to a different set of rows (UX-01).
+  useEffect(() => {
+    setSelectedIds(new Set());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(filters), page]);
 
   function navigate(updates: Record<string, string | undefined>, resetPage = true) {
     const params = new URLSearchParams();
@@ -89,8 +97,34 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
     });
   }
 
+  const visibleIds = leads.map((l) => l.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someSelected = visibleIds.some((id) => selectedIds.has(id));
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [someSelected, allSelected]);
+
   function toggleSelectAll() {
-    setSelectedIds((prev) => (prev.size === leads.length ? new Set() : new Set(leads.map((l) => l.id))));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  }
+
+  function buildBackHref() {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([k, v]) => { if (v) params.set(k, v); });
+    if (page > 1) params.set("page", String(page));
+    const qs = params.toString();
+    return `/crm${qs ? `?${qs}` : ""}`;
   }
 
   async function handleBulkApply() {
@@ -127,16 +161,22 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
     return `/api/crm/leads/export${params.toString() ? `?${params}` : ""}`;
   }
 
+  // Potential (no order yet) and ordered/paid (has an order) are kept separate —
+  // summing them together would make unconfirmed potential look like a real debt (UX-17).
   const pageTotals = leads.reduce(
     (acc, lead) => {
-      const t = rowTotals(lead);
-      acc.amount += t.amount;
-      if (t.paid !== null) acc.paid += t.paid;
+      if (lead.order) {
+        acc.ordered += lead.order.amount;
+        const t = rowTotals(lead);
+        if (t.paid !== null) acc.paid += t.paid;
+      } else {
+        acc.potential += lead.totalPrice;
+      }
       return acc;
     },
-    { amount: 0, paid: 0 }
+    { potential: 0, ordered: 0, paid: 0 }
   );
-  const pageRemaining = pageTotals.amount - pageTotals.paid;
+  const pageDue = pageTotals.ordered - pageTotals.paid;
 
   return (
     <div>
@@ -172,7 +212,7 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
 
           <select value={filters.assignedToId ?? ""} onChange={(e) => navigate({ assignedToId: e.target.value || undefined })} className="input-field text-sm w-auto py-2">
             {currentUserRole === "ADMIN" && <option value="">Все ответственные</option>}
-            <option value="unassigned">Не назначено</option>
+            {currentUserRole === "ADMIN" && <option value="unassigned">Не назначено</option>}
             {currentUserId && <option value={currentUserId}>Мои заявки</option>}
             {currentUserRole === "ADMIN" &&
               assignableUsers.filter((u) => u.id !== currentUserId).map((u) => (
@@ -215,11 +255,13 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
             <option value="">Статус...</option>
             {STATUS_OPTIONS.filter((s) => s !== "LOST").map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
           </select>
-          <select value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)} className="input-field text-sm w-auto py-1.5">
-            <option value="">Ответственный...</option>
-            <option value="unassigned">Не назначено</option>
-            {assignableUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          {currentUserRole === "ADMIN" && (
+            <select value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)} className="input-field text-sm w-auto py-1.5">
+              <option value="">Ответственный...</option>
+              <option value="unassigned">Не назначено</option>
+              {assignableUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+          )}
           <button onClick={handleBulkApply} disabled={savingBulk || (!bulkStatus && !bulkAssignee)} className="btn-primary px-4 py-1.5 text-sm disabled:opacity-50">
             Применить
           </button>
@@ -228,6 +270,27 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
           </button>
         </div>
       )}
+
+      <div className="card p-4 mb-4 flex flex-wrap gap-6">
+        <div>
+          <p className="text-xs text-text-muted uppercase tracking-wider">Потенциал заявок</p>
+          <p className="font-semibold text-text">{formatPrice(pageTotals.potential)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-text-muted uppercase tracking-wider">Заказано</p>
+          <p className="font-semibold text-text">{formatPrice(pageTotals.ordered)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-text-muted uppercase tracking-wider">Оплачено</p>
+          <p className="font-semibold text-text">{formatPrice(pageTotals.paid)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-text-muted uppercase tracking-wider">К оплате</p>
+          <p className={cn("font-semibold", pageDue > 0 ? "text-amber-700" : pageDue < 0 ? "text-red-600" : "text-green-700")}>
+            {formatPrice(pageDue)}
+          </p>
+        </div>
+      </div>
 
       {leads.length === 0 ? (
         <div className="card p-10 text-center">
@@ -240,7 +303,7 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
             <thead className="bg-surface border-b border-border">
               <tr>
                 <th className="px-3 py-3 text-left">
-                  <input type="checkbox" checked={selectedIds.size === leads.length} onChange={toggleSelectAll} />
+                  <input ref={headerCheckboxRef} type="checkbox" checked={allSelected} onChange={toggleSelectAll} />
                 </th>
                 <th className="text-left px-3 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">№</th>
                 <th className="text-left px-3 py-3 text-xs font-semibold text-text-muted uppercase tracking-wider">Дата</th>
@@ -261,7 +324,7 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
                 return (
                   <tr
                     key={lead.id}
-                    onClick={() => router.push(`/crm/leads/${lead.id}`)}
+                    onClick={() => router.push(`/crm/leads/${lead.id}?back=${encodeURIComponent(buildBackHref())}`)}
                     className={cn("cursor-pointer hover:bg-surface/60 transition-colors", lead.archivedAt && "opacity-60")}
                   >
                     <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
@@ -301,17 +364,6 @@ export default function LeadsInboard({ leads, total, page, pageSize, assignableU
                 );
               })}
             </tbody>
-            <tfoot className="bg-surface border-t border-border font-semibold text-text">
-              <tr>
-                <td colSpan={6} className="px-3 py-3 text-right text-xs text-text-muted uppercase tracking-wider">Итого на странице</td>
-                <td className="px-3 py-3 text-right">{formatPrice(pageTotals.amount)}</td>
-                <td className="px-3 py-3 text-right">{formatPrice(pageTotals.paid)}</td>
-                <td className={cn("px-3 py-3 text-right", pageRemaining > 0 ? "text-amber-700" : pageRemaining < 0 ? "text-red-600" : "text-green-700")}>
-                  {formatPrice(pageRemaining)}
-                </td>
-                <td />
-              </tr>
-            </tfoot>
           </table>
         </div>
       )}

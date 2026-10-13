@@ -4,8 +4,6 @@ import { X, Search, Link2, RefreshCw } from "lucide-react";
 import type { Product, BundleEntry } from "@/types";
 import { formatPrice, cn } from "@/lib/utils";
 
-const ADMIN_PASSWORD = "dilas2024";
-
 interface Props {
   product: Product;
   allProducts: Product[];
@@ -40,10 +38,7 @@ export default function BundleModal({ product, allProducts, onClose }: Props) {
     try {
       await fetch(`/api/bundle/${product.id}`, {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${ADMIN_PASSWORD}`,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ manual: bundle.manual }),
       });
       onClose();
@@ -55,10 +50,7 @@ export default function BundleModal({ product, allProducts, onClose }: Props) {
   const handleRecalculate = async () => {
     setRecalculating(true);
     try {
-      await fetch("/api/bundle/recalculate", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${ADMIN_PASSWORD}` },
-      });
+      await fetch("/api/bundle/recalculate", { method: "POST" });
       const res = await fetch(`/api/bundle/${product.id}`);
       setBundle(await res.json());
     } finally {

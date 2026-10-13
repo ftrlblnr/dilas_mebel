@@ -16,5 +16,5 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/crm/:path*", "/miniapp/:path*"],
+  matcher: ["/crm/:path*", "/miniapp/:path*", "/admin/:path*"],
 };

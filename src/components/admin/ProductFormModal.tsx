@@ -87,7 +87,6 @@ export default function ProductFormModal({
       fd.append("file", file);
       const res = await fetch("/api/upload", {
         method: "POST",
-        headers: { Authorization: "Bearer dilas2024" },
         body: fd,
       });
       if (!res.ok) throw new Error((await res.json()).error);
@@ -135,7 +134,7 @@ export default function ProductFormModal({
       const method = isNew ? "POST" : "PUT";
       const res = await fetch(url, {
         method,
-        headers: { "Content-Type": "application/json", Authorization: "Bearer dilas2024" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(await res.text());

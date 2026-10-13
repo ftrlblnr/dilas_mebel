@@ -1,14 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdmin } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { readProducts, writeProducts } from "@/lib/products-server";
 import type { Product } from "@/types";
-
-const ADMIN_PASSWORD = "dilas2024";
-
-function authorized(req: NextRequest): boolean {
-  const auth = req.headers.get("authorization");
-  return auth === `Bearer ${ADMIN_PASSWORD}`;
-}
 
 export async function GET() {
   const products = readProducts();
@@ -16,7 +10,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await isAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = (await req.json()) as Omit<Product, "id" | "createdAt">;
   const products = readProducts();

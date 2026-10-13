@@ -49,3 +49,9 @@ export async function requireAdmin() {
   if (session?.user?.role !== "ADMIN") redirect("/crm");
   return session;
 }
+
+/** For API routes: use instead of requireAdmin(), which redirect()s and isn't meaningful for JSON responses. */
+export async function isAdmin() {
+  const session = await auth();
+  return session?.user?.role === "ADMIN";
+}

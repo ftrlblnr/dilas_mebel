@@ -4,8 +4,6 @@ import { X, Plus, Trash2, ChevronDown, ChevronUp, Copy, Check } from "lucide-rea
 import type { CustomCriterion, CustomVariant, CustomizationMap, Product } from "@/types";
 import { formatPrice } from "@/lib/utils";
 
-const ADMIN_PASSWORD = "dilas2024";
-
 function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
@@ -81,7 +79,7 @@ export default function CustomizationModal({ productId, productName, allProducts
     setSaving(true);
     await fetch(`/api/customizations/${productId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_PASSWORD}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(updated),
     });
     setCriteria(updated);

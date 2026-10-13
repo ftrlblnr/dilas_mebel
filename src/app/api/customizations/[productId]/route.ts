@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdmin } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { readCustomizations, writeCustomizations } from "@/lib/customizations-server";
 import { getProductById } from "@/lib/products-server";
 import type { CustomCriterion } from "@/types";
-
-const ADMIN_PASSWORD = "dilas2024";
-
-function authorized(req: NextRequest): boolean {
-  return req.headers.get("authorization") === `Bearer ${ADMIN_PASSWORD}`;
-}
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ productId: string }> }) {
   const { productId } = await params;
@@ -17,7 +12,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ pro
 }
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ productId: string }> }) {
-  if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await isAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { productId } = await params;
   const criteria = (await req.json()) as CustomCriterion[];

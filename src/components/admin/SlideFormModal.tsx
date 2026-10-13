@@ -11,8 +11,6 @@ export interface HeroSlide {
   ctaLink: string;
 }
 
-const ADMIN_PASSWORD = "dilas2024";
-
 const EMPTY: Omit<HeroSlide, "id"> = {
   image: "",
   headline: "",
@@ -50,7 +48,6 @@ export default function SlideFormModal({ slide, onSave, onClose }: Props) {
       fd.append("file", file);
       const res = await fetch("/api/upload", {
         method: "POST",
-        headers: { Authorization: `Bearer ${ADMIN_PASSWORD}` },
         body: fd,
       });
       const data = await res.json();
@@ -74,7 +71,7 @@ export default function SlideFormModal({ slide, onSave, onClose }: Props) {
       const url = slide ? `/api/slides/${slide.id}` : "/api/slides";
       const res = await fetch(url, {
         method: slide ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_PASSWORD}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error("Ошибка сохранения");

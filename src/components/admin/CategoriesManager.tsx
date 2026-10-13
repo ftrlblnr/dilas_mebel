@@ -3,8 +3,6 @@ import { useEffect, useState } from "react";
 import { Plus, Trash2, ChevronUp, ChevronDown, Save, CheckCircle2, FolderTree } from "lucide-react";
 import type { NavCategory, NavSubcategory } from "@/lib/categories-server";
 
-const ADMIN_PASSWORD = "dilas2024";
-
 const TRANSLIT: Record<string, string> = {
   а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
   й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
@@ -80,7 +78,7 @@ export default function CategoriesManager() {
       const payload = categories.map((c) => ({ ...c, labelEn: c.label }));
       const res = await fetch("/api/categories", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ADMIN_PASSWORD}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const data = await res.json();

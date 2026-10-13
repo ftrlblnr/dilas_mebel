@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAdmin } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { readSlides, writeSlides } from "@/lib/slides-server";
 import type { HeroSlide } from "@/lib/slides-server";
-
-const ADMIN_PASSWORD = "dilas2024";
-
-function authorized(req: NextRequest): boolean {
-  return req.headers.get("authorization") === `Bearer ${ADMIN_PASSWORD}`;
-}
 
 export async function GET() {
   return NextResponse.json(readSlides());
 }
 
 export async function POST(req: NextRequest) {
-  if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await isAdmin())) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = (await req.json()) as Omit<HeroSlide, "id">;
   const slides = readSlides();

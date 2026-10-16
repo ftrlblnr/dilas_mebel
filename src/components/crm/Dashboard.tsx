@@ -3,8 +3,9 @@ import { LayoutDashboard, ListChecks } from "lucide-react";
 import { cn, formatPrice } from "@/lib/utils";
 import type { LeadStats } from "@/lib/leads-server";
 import type { MyOpenTask } from "@/lib/tasks-server";
-import type { LeadStatus, LeadSource } from "@prisma/client";
-import { STATUS_LABEL, STATUS_STYLE, SOURCE_LABEL, TASK_TYPE_LABEL, LOST_REASON_LABEL } from "@/lib/lead-labels";
+import type { LeadSource } from "@prisma/client";
+import { SOURCE_LABEL, TASK_TYPE_LABEL, LOST_REASON_LABEL } from "@/lib/lead-labels";
+import StagePill from "@/components/crm/StagePill";
 
 function formatDate(d: Date | string) {
   return new Date(d).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
@@ -42,13 +43,7 @@ export default function Dashboard({
         <StatCard label="Просрочено (2ч+)" value={stats.overdue} className={stats.overdue > 0 ? "ring-1 ring-red-300" : ""} />
         <StatCard
           label="В работе"
-          value={
-            stats.byStatus.NEEDS_ASSESSMENT +
-            stats.byStatus.FURNITURE_SELECTION +
-            stats.byStatus.QUOTE_SENT +
-            stats.byStatus.NEGOTIATION +
-            stats.byStatus.AWAITING_PAYMENT
-          }
+          value={stats.byStage.filter((s) => s.key !== "NEW" && s.key !== "DONE" && s.key !== "CANCELED").reduce((sum, s) => sum + s.count, 0)}
         />
       </div>
 
@@ -66,12 +61,12 @@ export default function Dashboard({
 
       <div className="grid sm:grid-cols-2 gap-4 mb-6">
         <div className="card p-4">
-          <p className="text-xs text-text-muted mb-3 font-semibold">По статусам</p>
+          <p className="text-xs text-text-muted mb-3 font-semibold">По этапам</p>
           <div className="space-y-2">
-            {(Object.keys(stats.byStatus) as LeadStatus[]).map((s) => (
-              <div key={s} className="flex items-center justify-between text-sm">
-                <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full", STATUS_STYLE[s])}>{STATUS_LABEL[s]}</span>
-                <span className="font-semibold text-text">{stats.byStatus[s]}</span>
+            {stats.byStage.map((s) => (
+              <div key={s.stageId} className="flex items-center justify-between text-sm">
+                <StagePill stage={s} />
+                <span className="font-semibold text-text">{s.count}</span>
               </div>
             ))}
           </div>
@@ -115,7 +110,7 @@ export default function Dashboard({
             {myTasks.map((t) => (
               <Link
                 key={t.id}
-                href={`/crm?search=${encodeURIComponent(t.lead.refNumber)}`}
+                href={`/crm/leads/${t.lead.id}`}
                 className="flex items-center justify-between text-sm bg-white border border-border rounded-lg px-3 py-2 hover:border-primary/40"
               >
                 <span className="text-text">{TASK_TYPE_LABEL[t.type]} — {t.lead.fullName}</span>

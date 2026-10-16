@@ -8,11 +8,11 @@ export async function getLeadsWithoutOpenTask(actor: LeadActor, limit = 10) {
   return prisma.lead.findMany({
     where: {
       archivedAt: null,
-      status: { notIn: ["WON", "LOST"] },
+      stage: { type: "WORK" },
       tasks: { none: { completedAt: null } },
       ...(scope ?? {}),
     },
-    select: { id: true, refNumber: true, fullName: true, status: true, assignedTo: { select: { name: true } } },
+    select: { id: true, refNumber: true, fullName: true, stage: { select: { name: true } }, assignedTo: { select: { name: true } } },
     orderBy: { createdAt: "asc" },
     take: limit,
   });
@@ -21,7 +21,7 @@ export async function getLeadsWithoutOpenTask(actor: LeadActor, limit = 10) {
 /** Новые заявки без ответственного — общая очередь, требующая разбора. */
 export async function getUnassignedNewLeads(limit = 10) {
   return prisma.lead.findMany({
-    where: { archivedAt: null, assignedToId: null, status: "NEW" },
+    where: { archivedAt: null, assignedToId: null, stage: { key: "NEW" } },
     select: { id: true, refNumber: true, fullName: true, createdAt: true },
     orderBy: { createdAt: "asc" },
     take: limit,

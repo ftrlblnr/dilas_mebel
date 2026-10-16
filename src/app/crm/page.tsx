@@ -1,57 +1,80 @@
 import { auth } from "@/lib/auth";
-import { listLeads } from "@/lib/leads-server";
 import { listAssignableUsers } from "@/lib/users-server";
-import LeadsInboard from "@/components/crm/LeadsInboard";
-import type { LeadSource, LeadStatus } from "@prisma/client";
+import { listActiveStages } from "@/lib/stages-server";
+import { listOrdersForKanban, listOrdersForTable, isAttention } from "@/lib/orders-board-server";
+import { formatPrice } from "@/lib/utils";
+import OrdersHeader from "@/components/crm/OrdersHeader";
+import OrdersKanban from "@/components/crm/OrdersKanban";
+import OrdersTable from "@/components/crm/OrdersTable";
+import type { TableTab } from "@/lib/orders-board-server";
 
 const PAGE_SIZE = 20;
 
-export default async function CrmLeadsPage({
+export default async function CrmOrdersPage({
   searchParams,
 }: {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const sp = await searchParams;
   const session = await auth();
+  const actor = { id: session?.user?.id ?? "", role: session?.user?.role ?? ("MANAGER" as const) };
 
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
-  const status = one(sp.status) as LeadStatus | undefined;
-  const source = one(sp.source) as LeadSource | undefined;
-  const assignedToId = one(sp.assignedToId);
+  const view = one(sp.view) === "table" ? "table" : "kanban";
   const search = one(sp.search);
-  const dateFrom = one(sp.dateFrom);
-  const dateTo = one(sp.dateTo);
+  const managerId = one(sp.managerId);
+  const attention = one(sp.attention) === "1";
+  const tableTab = one(sp.tableTab) as TableTab | undefined;
   const page = Number(one(sp.page)) || 1;
-  const includeArchived = one(sp.archived) === "1";
 
-  const [{ leads, total }, assignableUsers] = await Promise.all([
-    listLeads(
-      {
-        status,
-        source,
-        assignedToId,
-        search,
-        dateFrom: dateFrom ? new Date(dateFrom) : undefined,
-        dateTo: dateTo ? new Date(`${dateTo}T23:59:59`) : undefined,
-        page,
-        pageSize: PAGE_SIZE,
-        includeArchived,
-      },
-      session?.user?.id ? { id: session.user.id, role: session.user.role ?? "MANAGER" } : undefined
-    ),
-    listAssignableUsers(),
-  ]);
+  const backHref = (() => {
+    const params = new URLSearchParams();
+    params.set("view", view);
+    if (search) params.set("search", search);
+    if (managerId) params.set("managerId", managerId);
+    if (attention) params.set("attention", "1");
+    if (tableTab) params.set("tableTab", tableTab);
+    if (page > 1) params.set("page", String(page));
+    return `/crm?${params.toString()}`;
+  })();
+
+  const [assignableUsers, stages] = await Promise.all([listAssignableUsers(), listActiveStages()]);
+
+  if (view === "table") {
+    const { leads, total } = await listOrdersForTable({ managerId, search, tableTab, page, pageSize: PAGE_SIZE }, actor);
+    return (
+      <div>
+        <OrdersHeader view="table" subtitle={`${total} заказ(ов)`} search={search} managerId={managerId} assignableUsers={assignableUsers} />
+        <OrdersTable
+          leads={leads}
+          total={total}
+          page={page}
+          pageSize={PAGE_SIZE}
+          filters={{ managerId, tableTab, search }}
+          assignableUsers={assignableUsers}
+          backHref={backHref}
+        />
+      </div>
+    );
+  }
+
+  const kanbanLeads = await listOrdersForKanban({ managerId, search, attention }, actor);
+  const allActiveLeads = attention ? await listOrdersForKanban({ managerId, search }, actor) : kanbanLeads;
+  const attentionCount = allActiveLeads.filter(isAttention).length;
+  const totalSum = kanbanLeads.reduce((s, l) => s + (l.order?.amount ?? l.totalPrice), 0);
 
   return (
-    <LeadsInboard
-      leads={leads}
-      total={total}
-      page={page}
-      pageSize={PAGE_SIZE}
-      assignableUsers={assignableUsers}
-      currentUserId={session?.user?.id ?? ""}
-      currentUserRole={session?.user?.role}
-      filters={{ status, source, assignedToId, search, dateFrom, dateTo, archived: includeArchived ? "1" : undefined }}
-    />
+    <div>
+      <OrdersHeader
+        view="kanban"
+        subtitle={`${kanbanLeads.length} активных · ${formatPrice(totalSum)} в работе`}
+        search={search}
+        attention={attention}
+        managerId={managerId}
+        assignableUsers={assignableUsers}
+        attentionCount={attentionCount}
+      />
+      <OrdersKanban leads={kanbanLeads} stages={stages} backHref={backHref} />
+    </div>
   );
 }

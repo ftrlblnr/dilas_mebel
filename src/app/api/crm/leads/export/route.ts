@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { exportLeadsCsv } from "@/lib/leads-server";
-import type { LeadSource, LeadStatus } from "@prisma/client";
+import type { LeadSource } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
   const session = await auth();
@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const csv = await exportLeadsCsv(
     {
-      status: (sp.get("status") as LeadStatus) || undefined,
+      stageId: sp.get("stageId") || undefined,
       source: (sp.get("source") as LeadSource) || undefined,
       assignedToId: sp.get("assignedToId") || undefined,
       search: sp.get("search") || undefined,

@@ -5,16 +5,6 @@ import { bulkUpdateLeads } from "@/lib/leads-server";
 
 const patchSchema = z.object({
   ids: z.array(z.string()).min(1),
-  status: z.enum([
-    "NEW",
-    "NEEDS_ASSESSMENT",
-    "FURNITURE_SELECTION",
-    "QUOTE_SENT",
-    "NEGOTIATION",
-    "AWAITING_PAYMENT",
-    "WON",
-    "LOST",
-  ]).optional(),
   assignedToId: z.string().nullable().optional(),
 });
 
@@ -24,7 +14,7 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
-  if (!parsed.success || (parsed.data.status === undefined && parsed.data.assignedToId === undefined)) {
+  if (!parsed.success || parsed.data.assignedToId === undefined) {
     return NextResponse.json({ message: "Некорректные данные" }, { status: 400 });
   }
 

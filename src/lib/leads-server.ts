@@ -1,10 +1,11 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { Lead, LeadSource, LeadStatus, LeadNote, LeadActivity, Task, LostReason, Prisma } from "@prisma/client";
-import { OVERDUE_HOURS, STATUS_LABEL, SOURCE_LABEL } from "@/lib/lead-labels";
+import type { Lead, LeadSource, LeadNote, LeadActivity, Task, LostReason, Stage, Prisma } from "@prisma/client";
+import { SOURCE_LABEL } from "@/lib/lead-labels";
 import { notifyNewUnassignedLead, notifyLeadAssigned, notifyNewNoteFromColleague } from "@/lib/lead-notifications";
 import { normalizePhone } from "@/lib/utils";
 import { findOrCreateCustomerByPhone } from "@/lib/customers-server";
+import { getStageByKey, listActiveStages } from "@/lib/stages-server";
 
 export interface LeadItemInput {
   productId?: string;
@@ -35,6 +36,8 @@ export async function createLead(input: CreateLeadInput): Promise<Lead> {
     email: input.email,
     city: input.city,
   });
+  const newStage = await getStageByKey("NEW");
+  if (!newStage) throw new Error("Начальный этап 'NEW' не найден — проверьте таблицу Stage");
   const lead = await prisma.lead.create({
     data: {
       refNumber: input.refNumber,
@@ -48,6 +51,7 @@ export async function createLead(input: CreateLeadInput): Promise<Lead> {
       itemsJson: JSON.stringify(input.items ?? []),
       totalPrice: input.totalPrice ?? 0,
       customerId: customer.id,
+      stageId: newStage.id,
     },
   });
   notifyNewUnassignedLead(lead).catch((err) => console.error("telegram notify failed:", err));
@@ -59,6 +63,7 @@ export type LeadWithNotes = Lead & {
   assignedTo: { id: string; name: string } | null;
   activities: (LeadActivity & { user: { name: string } })[];
   customer: { id: string; fullName: string; phone: string };
+  stage: Stage;
   order: { amount: number; payments: { amount: number; refunds: { amount: number }[] }[] } | null;
 };
 
@@ -71,6 +76,7 @@ const LEAD_INCLUDE = {
   assignedTo: { select: { id: true, name: true } },
   activities: { include: { user: { select: { name: true } } }, orderBy: { createdAt: "asc" as const } },
   customer: { select: { id: true, fullName: true, phone: true } },
+  stage: true,
   order: {
     select: {
       amount: true,
@@ -100,7 +106,7 @@ export function leadScopeCondition(actor?: LeadActor): Prisma.LeadWhereInput | u
 }
 
 export interface ListLeadsFilter {
-  status?: LeadStatus;
+  stageId?: string;
   source?: LeadSource;
   /** a user id, "unassigned", or omitted for no filter */
   assignedToId?: string;
@@ -124,7 +130,7 @@ export interface ListLeadsResult {
 export async function listLeads(filter: ListLeadsFilter = {}, actor?: LeadActor): Promise<ListLeadsResult> {
   const conditions: Prisma.LeadWhereInput[] = [];
   if (!filter.includeArchived) conditions.push({ archivedAt: null });
-  if (filter.status) conditions.push({ status: filter.status });
+  if (filter.stageId) conditions.push({ stageId: filter.stageId });
   if (filter.source) conditions.push({ source: filter.source });
   if (filter.customerId) conditions.push({ customerId: filter.customerId });
 
@@ -134,7 +140,7 @@ export async function listLeads(filter: ListLeadsFilter = {}, actor?: LeadActor)
     conditions.push({ assignedToId: filter.assignedToId });
   }
   // MANAGER requesting a different manager's id: request is ignored, full
-  // manager scope (own + unassigned) is enforced below instead.
+  // manager scope (own leads only) is enforced below instead.
 
   if (filter.dateFrom || filter.dateTo) {
     conditions.push({
@@ -177,7 +183,6 @@ export async function listLeads(filter: ListLeadsFilter = {}, actor?: LeadActor)
 }
 
 export interface UpdateLeadInput {
-  status?: LeadStatus;
   assignedToId?: string | null;
   archived?: boolean;
   fullName?: string;
@@ -186,8 +191,6 @@ export interface UpdateLeadInput {
   city?: string | null;
   comment?: string | null;
   preferredTime?: string | null;
-  lostReason?: LostReason;
-  lostReasonNote?: string | null;
 }
 
 export async function getLeadById(id: string, actor?: LeadActor): Promise<LeadWithDetails | null> {
@@ -210,11 +213,6 @@ export async function updateLead(id: string, input: UpdateLeadInput, actorId?: s
     }
   }
 
-  if (input.status === "LOST" && !input.lostReason) {
-    const current = await prisma.lead.findUnique({ where: { id }, select: { lostReason: true } });
-    if (!current?.lostReason) throw new Error("Укажите причину отказа");
-  }
-
   const { archived, ...rest } = input;
   const data = {
     ...rest,
@@ -222,41 +220,32 @@ export async function updateLead(id: string, input: UpdateLeadInput, actorId?: s
     ...(archived === undefined ? {} : { archivedAt: archived ? new Date() : null }),
   };
 
-  if (!actorId || (input.status === undefined && input.assignedToId === undefined)) {
+  if (!actorId || input.assignedToId === undefined) {
     return prisma.lead.update({ where: { id }, data });
   }
 
   let assignedNotifyTarget: string | null = null;
 
   const updated = await prisma.$transaction(async (tx) => {
-    const before = await tx.lead.findUniqueOrThrow({ where: { id }, select: { status: true, assignedToId: true } });
+    const before = await tx.lead.findUniqueOrThrow({ where: { id }, select: { assignedToId: true } });
     const updatedLead = await tx.lead.update({ where: { id }, data });
 
-    const activities: Prisma.LeadActivityCreateManyInput[] = [];
-    if (input.status !== undefined && input.status !== before.status) {
-      activities.push({
-        leadId: id,
-        userId: actorId,
-        field: "status",
-        oldValue: STATUS_LABEL[before.status],
-        newValue: STATUS_LABEL[input.status],
-      });
-    }
     if (input.assignedToId !== undefined && input.assignedToId !== before.assignedToId) {
       const [oldUser, newUser] = await Promise.all([
         before.assignedToId ? tx.user.findUnique({ where: { id: before.assignedToId }, select: { name: true } }) : null,
         input.assignedToId ? tx.user.findUnique({ where: { id: input.assignedToId }, select: { name: true } }) : null,
       ]);
-      activities.push({
-        leadId: id,
-        userId: actorId,
-        field: "assignedTo",
-        oldValue: oldUser?.name ?? "не назначено",
-        newValue: newUser?.name ?? "не назначено",
+      await tx.leadActivity.create({
+        data: {
+          leadId: id,
+          userId: actorId,
+          field: "assignedTo",
+          oldValue: oldUser?.name ?? "не назначено",
+          newValue: newUser?.name ?? "не назначено",
+        },
       });
       if (input.assignedToId && input.assignedToId !== actorId) assignedNotifyTarget = input.assignedToId;
     }
-    if (activities.length > 0) await tx.leadActivity.createMany({ data: activities });
 
     return updatedLead;
   });
@@ -268,16 +257,47 @@ export async function updateLead(id: string, input: UpdateLeadInput, actorId?: s
   return updated;
 }
 
+/** Advances a lead to the given target stage (validated by the caller via stage-transitions.ts guards). */
+export async function advanceLeadStage(leadId: string, toStageId: string, actorId: string): Promise<Lead> {
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.lead.findUniqueOrThrow({ where: { id: leadId }, include: { stage: true } });
+    const toStage = await tx.stage.findUniqueOrThrow({ where: { id: toStageId } });
+    const updated = await tx.lead.update({ where: { id: leadId }, data: { stageId: toStageId } });
+    await tx.leadActivity.create({
+      data: { leadId, userId: actorId, field: "stage", oldValue: before.stage.name, newValue: toStage.name },
+    });
+    return updated;
+  });
+}
+
+/** Cancels a lead (-> "CANCELED" stage) with a reason, available from any non-terminal stage. */
+export async function cancelLeadStage(
+  leadId: string,
+  actorId: string,
+  reason: LostReason,
+  note: string | null
+): Promise<Lead> {
+  const canceled = await getStageByKey("CANCELED");
+  if (!canceled) throw new Error("Этап 'CANCELED' не найден — проверьте таблицу Stage");
+  return prisma.$transaction(async (tx) => {
+    const before = await tx.lead.findUniqueOrThrow({ where: { id: leadId }, include: { stage: true } });
+    const updated = await tx.lead.update({
+      where: { id: leadId },
+      data: { stageId: canceled.id, lostReason: reason, lostReasonNote: note },
+    });
+    await tx.leadActivity.create({
+      data: { leadId, userId: actorId, field: "stage", oldValue: before.stage.name, newValue: canceled.name },
+    });
+    return updated;
+  });
+}
+
 export async function bulkUpdateLeads(
   ids: string[],
-  data: { status?: LeadStatus; assignedToId?: string | null },
+  data: { assignedToId?: string | null },
   actorId?: string,
   actorRole?: LeadActor["role"]
 ): Promise<number> {
-  if (data.status === "LOST") {
-    throw new Error("Закрытие без продажи с указанием причины доступно только по одной заявке — откройте заявку и закройте её оттуда");
-  }
-
   if (actorRole === "MANAGER" && data.assignedToId !== undefined) {
     throw new Error("Назначать заявки может только администратор");
   }
@@ -292,14 +312,14 @@ export async function bulkUpdateLeads(
     if (scopedIds.length === 0) return 0;
   }
 
-  if (!actorId || (data.status === undefined && data.assignedToId === undefined)) {
+  if (!actorId || data.assignedToId === undefined) {
     const result = await prisma.lead.updateMany({ where: { id: { in: scopedIds } }, data });
     return result.count;
   }
 
   const before = await prisma.lead.findMany({
     where: { id: { in: scopedIds } },
-    select: { id: true, status: true, assignedToId: true },
+    select: { id: true, assignedToId: true },
   });
   const result = await prisma.lead.updateMany({ where: { id: { in: scopedIds } }, data });
 
@@ -316,15 +336,6 @@ export async function bulkUpdateLeads(
   const activities: Prisma.LeadActivityCreateManyInput[] = [];
   const assignedLeadIds: string[] = [];
   for (const lead of before) {
-    if (data.status !== undefined && data.status !== lead.status) {
-      activities.push({
-        leadId: lead.id,
-        userId: actorId,
-        field: "status",
-        oldValue: STATUS_LABEL[lead.status],
-        newValue: STATUS_LABEL[data.status],
-      });
-    }
     if (data.assignedToId !== undefined && data.assignedToId !== lead.assignedToId) {
       activities.push({
         leadId: lead.id,
@@ -380,7 +391,7 @@ function csvEscape(value: string): string {
 
 export async function exportLeadsCsv(filter: ListLeadsFilter = {}, actor?: LeadActor): Promise<string> {
   const { leads } = await listLeads({ ...filter, all: true, page: undefined, pageSize: undefined }, actor);
-  const header = ["№", "Дата", "Источник", "Имя", "Телефон", "Email", "Город", "Статус", "Ответственный", "Сумма"];
+  const header = ["№", "Дата", "Источник", "Имя", "Телефон", "Email", "Город", "Этап", "Ответственный", "Сумма"];
   const rows = leads.map((lead) => [
     lead.refNumber,
     lead.createdAt.toLocaleString("ru-RU"),
@@ -389,7 +400,7 @@ export async function exportLeadsCsv(filter: ListLeadsFilter = {}, actor?: LeadA
     `+7${lead.phone}`,
     lead.email ?? "",
     lead.city ?? "",
-    STATUS_LABEL[lead.status],
+    lead.stage.name,
     lead.assignedTo?.name ?? "",
     String(lead.totalPrice),
   ]);
@@ -398,7 +409,7 @@ export async function exportLeadsCsv(filter: ListLeadsFilter = {}, actor?: LeadA
 
 export interface LeadStats {
   total: number;
-  byStatus: Record<LeadStatus, number>;
+  byStage: { stageId: string; key: string; name: string; color: string; count: number }[];
   bySource: Record<LeadSource, number>;
   unassigned: number;
   overdue: number;
@@ -410,34 +421,27 @@ export interface LeadStats {
 
 export async function getLeadStats(): Promise<LeadStats> {
   const activeWhere: Prisma.LeadWhereInput = { archivedAt: null };
+  const { OVERDUE_HOURS } = await import("@/lib/lead-labels");
   const overdueThreshold = new Date(Date.now() - OVERDUE_HOURS * 60 * 60 * 1000);
 
-  const [total, statusGroups, sourceGroups, unassigned, overdue, overdueTasks, lossReasonGroups, users] = await Promise.all([
+  const [total, stageGroups, sourceGroups, unassigned, overdue, overdueTasks, lossReasonGroups, users, stages] = await Promise.all([
     prisma.lead.count({ where: activeWhere }),
-    prisma.lead.groupBy({ by: ["status"], where: activeWhere, _count: true }),
+    prisma.lead.groupBy({ by: ["stageId"], where: activeWhere, _count: true }),
     prisma.lead.groupBy({ by: ["source"], where: activeWhere, _count: true }),
     prisma.lead.count({ where: { ...activeWhere, assignedToId: null } }),
-    prisma.lead.count({ where: { ...activeWhere, status: "NEW", createdAt: { lte: overdueThreshold } } }),
+    prisma.lead.count({ where: { ...activeWhere, stage: { key: "NEW" }, createdAt: { lte: overdueThreshold } } }),
     prisma.task.count({ where: { completedAt: null, dueAt: { lte: new Date() } } }),
-    prisma.lead.groupBy({ by: ["lostReason"], where: { ...activeWhere, status: "LOST", lostReason: { not: null } }, _count: true }),
+    prisma.lead.groupBy({ by: ["lostReason"], where: { ...activeWhere, stage: { key: "CANCELED" }, lostReason: { not: null } }, _count: true }),
     prisma.user.findMany({ where: { active: true }, select: { id: true, name: true } }),
+    listActiveStages(),
   ]);
 
   const lossReasons = lossReasonGroups
     .filter((g): g is typeof g & { lostReason: LostReason } => g.lostReason !== null)
     .map((g) => ({ reason: g.lostReason, count: g._count }));
 
-  const byStatus = {
-    NEW: 0,
-    NEEDS_ASSESSMENT: 0,
-    FURNITURE_SELECTION: 0,
-    QUOTE_SENT: 0,
-    NEGOTIATION: 0,
-    AWAITING_PAYMENT: 0,
-    WON: 0,
-    LOST: 0,
-  } as Record<LeadStatus, number>;
-  for (const g of statusGroups) byStatus[g.status] = g._count;
+  const countByStageId = new Map(stageGroups.map((g) => [g.stageId, g._count]));
+  const byStage = stages.map((s) => ({ stageId: s.id, key: s.key, name: s.name, color: s.color, count: countByStageId.get(s.id) ?? 0 }));
 
   const bySource = { CALLBACK: 0, QUICK_CALLBACK: 0, CUSTOM_ORDER: 0 } as Record<LeadSource, number>;
   for (const g of sourceGroups) bySource[g.source] = g._count;
@@ -447,16 +451,18 @@ export async function getLeadStats(): Promise<LeadStats> {
       id: u.id,
       name: u.name,
       count: await prisma.lead.count({
-        where: { ...activeWhere, assignedToId: u.id, status: { notIn: ["WON", "LOST"] } },
+        where: { ...activeWhere, assignedToId: u.id, stage: { type: "WORK" } },
       }),
     }))
   );
   managerLoad.sort((a, b) => b.count - a.count);
 
-  const decided = byStatus.WON + byStatus.LOST;
-  const conversionRate = decided > 0 ? byStatus.WON / decided : null;
+  const won = byStage.find((s) => s.key === "DONE")?.count ?? 0;
+  const lost = byStage.find((s) => s.key === "CANCELED")?.count ?? 0;
+  const decided = won + lost;
+  const conversionRate = decided > 0 ? won / decided : null;
 
-  return { total, byStatus, bySource, unassigned, overdue, overdueTasks, conversionRate, lossReasons, managerLoad };
+  return { total, byStage, bySource, unassigned, overdue, overdueTasks, conversionRate, lossReasons, managerLoad };
 }
 
 export function parseLeadItems(lead: Lead): LeadItemInput[] {

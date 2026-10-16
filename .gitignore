@@ -38,6 +38,7 @@ yarn-error.log*
 /dilas.db-journal
 /dilas.db-wal
 /dilas.db-shm
+/dilas.db.bak-*
 
 # runtime content managed via the admin panel/site — not source code
 /data/*.json

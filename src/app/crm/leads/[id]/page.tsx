@@ -4,6 +4,7 @@ import { getLeadById } from "@/lib/leads-server";
 import { getOrderForLead } from "@/lib/orders-server";
 import { getQuoteForLead } from "@/lib/quotes-server";
 import { listAssignableUsers } from "@/lib/users-server";
+import { listActiveStages } from "@/lib/stages-server";
 import LeadDetail from "@/components/crm/LeadDetail";
 
 export default async function CrmLeadPage({
@@ -18,11 +19,12 @@ export default async function CrmLeadPage({
   const session = await auth();
   const actor = { id: session?.user?.id ?? "", role: session?.user?.role ?? ("MANAGER" as const) };
 
-  const [lead, order, quote, assignableUsers] = await Promise.all([
+  const [lead, order, quote, assignableUsers, allStages] = await Promise.all([
     getLeadById(id, actor),
     getOrderForLead(id, actor),
     getQuoteForLead(id, actor),
     listAssignableUsers(),
+    listActiveStages(),
   ]);
   if (!lead) notFound();
 
@@ -34,6 +36,7 @@ export default async function CrmLeadPage({
       lead={lead}
       order={order}
       quote={quote}
+      allStages={allStages}
       assignableUsers={assignableUsers}
       currentUserId={actor.id}
       currentUserRole={session?.user?.role}

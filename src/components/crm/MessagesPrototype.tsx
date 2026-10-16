@@ -4,15 +4,30 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { MessageCircle, Camera, Globe, Search, Send, StickyNote, Phone, Check, Clock, Plug, Unplug, LinkIcon, Unlink, ExternalLink } from "lucide-react";
 import { cn, normalizePhone } from "@/lib/utils";
-import { STATUS_LABEL, STATUS_STYLE } from "@/lib/lead-labels";
-import type { LeadStatus } from "@prisma/client";
+
+// This component is an explicit no-backend prototype (see crm-process.md) — its mock
+// conversation data uses made-up stage labels decoupled from the real Stage model.
+const MOCK_STAGE_LABEL: Record<string, string> = {
+  NEW: "Новая сделка",
+  NEGOTIATION: "Согласование",
+  QUOTE_SENT: "Предложение отправлено",
+  WON: "Успешная продажа",
+};
+const MOCK_STAGE_STYLE: Record<string, string> = {
+  NEW: "bg-blue-100 text-blue-700",
+  NEGOTIATION: "bg-orange-100 text-orange-700",
+  QUOTE_SENT: "bg-indigo-100 text-indigo-700",
+  WON: "bg-green-100 text-green-700",
+};
 
 export interface RealLead {
   id: string;
   refNumber: string;
   fullName: string;
   phone: string;
-  status: LeadStatus;
+  stageKey: string;
+  stageName: string;
+  stageColor: string;
   assignedToName: string | null;
   orderAmount: number | null;
   orderRemaining: number | null;
@@ -52,7 +67,7 @@ interface MockConversation {
   channel: Channel;
   contactName: string;
   phone: string;
-  stage: LeadStatus;
+  stage: string;
   assignedTo: string;
   unread: number;
   orderAmount?: number;
@@ -72,7 +87,7 @@ function autoLinkConversations(convos: MockConversation[], leads: RealLead[]): M
     if (c.channel === "INSTAGRAM" || c.linkedLeadId) return c;
     const matches = leads.filter((l) => l.phone === normalizePhone(c.phone));
     if (matches.length === 0) return c;
-    const best = matches.find((l) => l.status !== "WON" && l.status !== "LOST") ?? matches[0];
+    const best = matches.find((l) => l.stageKey !== "DONE" && l.stageKey !== "CANCELED") ?? matches[0];
     return { ...c, linkedLeadId: best.id, linkSource: "AUTO" as const };
   });
 }
@@ -614,14 +629,18 @@ export default function MessagesPrototype({ currentUserName, realLeads }: { curr
 
               <div>
                 <p className="text-xs text-text-muted mb-1">Стадия сделки</p>
-                <span
-                  className={cn(
-                    "text-xs font-semibold px-2 py-0.5 rounded-full",
-                    STATUS_STYLE[linkedLead?.status ?? active.stage]
-                  )}
-                >
-                  {STATUS_LABEL[linkedLead?.status ?? active.stage]}
-                </span>
+                {linkedLead ? (
+                  <span
+                    className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={{ background: `${linkedLead.stageColor}1A`, color: linkedLead.stageColor }}
+                  >
+                    {linkedLead.stageName}
+                  </span>
+                ) : (
+                  <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full", MOCK_STAGE_STYLE[active.stage])}>
+                    {MOCK_STAGE_LABEL[active.stage]}
+                  </span>
+                )}
               </div>
               <div>
                 <p className="text-xs text-text-muted mb-1">Ответственный</p>

@@ -1,4 +1,11 @@
-import type { LeadStatus, LeadSource, TaskType, PaymentMethod, OrderAgreementStatus, TransferStatus } from "@prisma/client";
+import type { LeadSource, TaskType, PaymentMethod, OrderAgreementStatus, TransferStatus } from "@prisma/client";
+
+export interface MiniStage {
+  id: string;
+  key: string;
+  name: string;
+  color: string;
+}
 
 export interface MiniLeadNote {
   id: string;
@@ -61,7 +68,7 @@ export interface MiniLead {
   preferredTime: string | null;
   itemsJson: string;
   totalPrice: number;
-  status: LeadStatus;
+  stage: MiniStage;
   assignedToId: string | null;
   assignedTo: { id: string; name: string } | null;
   archivedAt: string | null;

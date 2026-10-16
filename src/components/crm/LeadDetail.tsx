@@ -24,9 +24,9 @@ import { useToast } from "@/components/providers/ToastProvider";
 import type { LeadWithDetails, LeadItemInput } from "@/lib/leads-server";
 import type { OrderWithDetails } from "@/lib/orders-server";
 import type { QuoteWithVersions } from "@/lib/quotes-server";
-import type { LeadStatus, LeadSource, TaskType, PaymentMethod, LostReason } from "@prisma/client";
+import type { LeadSource, TaskType, PaymentMethod, LostReason, Stage } from "@prisma/client";
 import type { Product } from "@/types";
-import { STATUS_LABEL, STATUS_STYLE, STATUS_OPTIONS, SOURCE_LABEL, OVERDUE_HOURS, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, LOST_REASON_LABEL, LOST_REASON_OPTIONS, PREFERRED_TIME_LABEL } from "@/lib/lead-labels";
+import { SOURCE_LABEL, OVERDUE_HOURS, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, LOST_REASON_LABEL, LOST_REASON_OPTIONS, PREFERRED_TIME_LABEL } from "@/lib/lead-labels";
 import {
   AGREEMENT_STATUS_LABEL,
   TRANSFER_STATUS_LABEL,
@@ -37,6 +37,8 @@ import {
   PAYMENT_STATUS_STYLE,
 } from "@/lib/order-labels";
 import { QUOTE_STATUS_LABEL, QUOTE_STATUS_STYLE } from "@/lib/quote-labels";
+import StagePill from "@/components/crm/StagePill";
+import { getTransitionRule, canCancelStage, type StageContext } from "@/lib/stage-transitions";
 
 const SOURCE_ICON: Record<LeadSource, typeof Phone> = {
   CALLBACK: ShoppingBag,
@@ -119,36 +121,24 @@ function digitsOnly(phone: string) {
   return phone.replace(/\D/g, "");
 }
 
-function nextActionHint(lead: LeadWithDetails, order: OrderWithDetails | null): { text: string; tone: "amber" | "blue" } | null {
-  if (lead.status === "WON" || lead.status === "LOST") return null;
-
-  if (order?.approvalRequired && !order.approvedAt) {
-    return { text: "Скидка по заказу ждёт согласования администратора", tone: "amber" };
-  }
-  const pendingPayment = order?.payments.find((p) => p.status === "PENDING_REVIEW");
-  if (pendingPayment) {
-    return { text: `Платёж ${formatPrice(pendingPayment.amount)} ждёт подтверждения администратора`, tone: "amber" };
-  }
-
+function nextOpenTask(lead: LeadWithDetails) {
   const openTasks = lead.tasks.filter((t) => !t.completedAt);
-  if (openTasks.length === 0) {
-    return { text: "Нет открытой задачи — создайте следующий шаг в блоке «Задачи» ниже", tone: "amber" };
-  }
-  const next = [...openTasks].sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0];
-  return { text: `Следующий шаг: ${TASK_TYPE_LABEL[next.type]} — ${next.assignedTo.name}, до ${formatDate(next.dueAt)}`, tone: "blue" };
+  if (openTasks.length === 0) return null;
+  return [...openTasks].sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0];
 }
 
 interface Props {
   lead: LeadWithDetails;
   order: OrderWithDetails | null;
   quote: QuoteWithVersions | null;
+  allStages: Stage[];
   assignableUsers: { id: string; name: string }[];
   currentUserId: string;
   currentUserRole?: string;
   backHref?: string;
 }
 
-export default function LeadDetail({ lead, order, quote, assignableUsers, currentUserId, currentUserRole, backHref }: Props) {
+export default function LeadDetail({ lead, order, quote, allStages, assignableUsers, currentUserId, currentUserRole, backHref }: Props) {
   const router = useRouter();
   const { showToast } = useToast();
 
@@ -156,11 +146,12 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState<EditableFields | null>(null);
   const [phoneMenuOpen, setPhoneMenuOpen] = useState(false);
-  const [lostReasonPromptOpen, setLostReasonPromptOpen] = useState(false);
-  const [lostReasonDraft, setLostReasonDraft] = useState<{ reason: LostReason; note: string }>({
+  const [cancelPromptOpen, setCancelPromptOpen] = useState(false);
+  const [cancelDraft, setCancelDraft] = useState<{ reason: LostReason; note: string }>({
     reason: lead.lostReason ?? "PRICE",
     note: lead.lostReasonNote ?? "",
   });
+  const [advancing, setAdvancing] = useState(false);
 
   const [noteDraft, setNoteDraft] = useState("");
   const [postingNote, setPostingNote] = useState(false);
@@ -194,20 +185,21 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
   const [savingQuote, setSavingQuote] = useState(false);
   const [quoteActionId, setQuoteActionId] = useState<string | null>(null);
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
+  const [orderPreviewOpen, setOrderPreviewOpen] = useState(false);
 
   const items = parseItems(lead.itemsJson);
-  const isOverdue = lead.status === "NEW" && overdueHours(lead.createdAt) >= OVERDUE_HOURS;
+  const isOverdue = lead.stage.key === "NEW" && overdueHours(lead.createdAt) >= OVERDUE_HOURS;
   const SourceIcon = SOURCE_ICON[lead.source];
   const isAdmin = currentUserRole === "ADMIN";
-  const hint = nextActionHint(lead, order);
+  const actorRole: "ADMIN" | "MANAGER" = isAdmin ? "ADMIN" : "MANAGER";
+  const stageCtx: StageContext = { lead, order, quote, actorRole };
+  const rule = getTransitionRule(lead.stage.key);
+  const guard = rule?.guard(stageCtx);
+  const roleOk = rule ? rule.allowedRoles.includes(actorRole) : false;
+  const nextTask = nextOpenTask(lead);
+  const canCancel = canCancelStage(lead.stage.type, actorRole);
 
-  async function handleLeadUpdate(data: {
-    status?: LeadStatus;
-    assignedToId?: string | null;
-    archived?: boolean;
-    lostReason?: LostReason;
-    lostReasonNote?: string | null;
-  }) {
+  async function handleLeadUpdate(data: { assignedToId?: string | null; archived?: boolean }) {
     setSaving(true);
     try {
       const res = await fetch(`/api/crm/leads/${lead.id}`, {
@@ -226,18 +218,48 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
     }
   }
 
-  function handleStatusSelect(value: LeadStatus) {
-    if (value === "LOST") {
-      setLostReasonDraft({ reason: lead.lostReason ?? "PRICE", note: lead.lostReasonNote ?? "" });
-      setLostReasonPromptOpen(true);
-      return;
+  async function handleAdvance() {
+    setAdvancing(true);
+    try {
+      const res = await fetch(`/api/crm/leads/${lead.id}/stage`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "advance" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message ?? "");
+      showToast("Этап обновлён");
+      router.refresh();
+    } catch (err) {
+      showToast(err instanceof Error && err.message ? err.message : "Не удалось перейти к следующему этапу", "error");
+    } finally {
+      setAdvancing(false);
     }
-    handleLeadUpdate({ status: value });
   }
 
-  function handleConfirmLostReason() {
-    setLostReasonPromptOpen(false);
-    handleLeadUpdate({ status: "LOST", lostReason: lostReasonDraft.reason, lostReasonNote: lostReasonDraft.note || null });
+  function handleOpenCancel() {
+    setCancelDraft({ reason: lead.lostReason ?? "PRICE", note: lead.lostReasonNote ?? "" });
+    setCancelPromptOpen(true);
+  }
+
+  async function handleConfirmCancel() {
+    setCancelPromptOpen(false);
+    setAdvancing(true);
+    try {
+      const res = await fetch(`/api/crm/leads/${lead.id}/stage`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel", cancelReason: cancelDraft.reason, cancelNote: cancelDraft.note || null }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message ?? "");
+      showToast("Заказ отменён");
+      router.refresh();
+    } catch (err) {
+      showToast(err instanceof Error && err.message ? err.message : "Не удалось отменить заказ", "error");
+    } finally {
+      setAdvancing(false);
+    }
   }
 
   function startEdit() {
@@ -370,7 +392,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
         body: JSON.stringify({ completed }),
       });
       if (!res.ok) throw new Error();
-      if (completed && lead.status !== "WON" && lead.status !== "LOST") {
+      if (completed && lead.stage.type === "WORK") {
         const otherOpenTasks = lead.tasks.filter((t) => !t.completedAt && t.id !== taskId);
         if (otherOpenTasks.length === 0) {
           showToast("Задача выполнена — не забудьте создать следующий шаг", "success");
@@ -689,11 +711,34 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
     }
   }
 
-  function handleCreateOrderFromQuote() {
+  function openOrderPreview() {
+    setOrderPreviewOpen(true);
+  }
+
+  async function confirmCreateOrderFromQuote() {
     if (!latestQuoteVersion) return;
     const total = computeQuoteDraftTotal(latestQuoteVersion.items, latestQuoteVersion.discountPercent);
-    setOrderDraft({ amount: String(total), discountPercent: String(latestQuoteVersion.discountPercent), discountReason: latestQuoteVersion.discountReason ?? "" });
-    showToast("Форма заказа заполнена суммой из предложения — проверьте и создайте заказ ниже");
+    setSavingOrder(true);
+    try {
+      const res = await fetch(`/api/crm/leads/${lead.id}/order`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount: total,
+          discountPercent: latestQuoteVersion.discountPercent,
+          discountReason: latestQuoteVersion.discountReason || undefined,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message ?? "");
+      showToast("Заказ создан из предложения");
+      setOrderPreviewOpen(false);
+      router.refresh();
+    } catch (err) {
+      showToast(err instanceof Error && err.message ? err.message : "Не удалось создать заказ", "error");
+    } finally {
+      setSavingOrder(false);
+    }
   }
 
   function handleCopyLink(token: string) {
@@ -719,7 +764,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
             <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap inline-flex items-center gap-1", "bg-surface border border-border text-text-muted")}>
               <SourceIcon size={11} /> {SOURCE_LABEL[lead.source]}
             </span>
-            <span className={cn("text-xs font-semibold px-2 py-1 rounded-full whitespace-nowrap", STATUS_STYLE[lead.status])}>{STATUS_LABEL[lead.status]}</span>
+            <StagePill stage={lead.stage} />
             {lead.archivedAt && (
               <span className="text-xs font-semibold px-2 py-1 rounded-full bg-surface border border-border text-text-muted">В архиве</span>
             )}
@@ -871,27 +916,63 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
         )}
       </div>
 
-      {hint && (
-        <div className={cn("card p-3 mb-4 text-sm font-medium", hint.tone === "amber" ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-blue-50 border-blue-200 text-blue-800")}>
-          {hint.text}
-        </div>
-      )}
-
       <div className="card p-5 mb-4">
-        <div className="flex items-center gap-6 flex-wrap">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-text-muted">Статус:</span>
-            <select
-              value={lead.status}
-              disabled={saving}
-              onChange={(e) => handleStatusSelect(e.target.value as LeadStatus)}
-              className="input-field text-sm w-auto py-1.5"
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-              ))}
-            </select>
+        {lead.stage.type !== "LOSE" && (
+          <div className="flex items-center gap-1 mb-4 overflow-x-auto pb-1">
+            {allStages.filter((s) => s.type !== "LOSE").map((s) => {
+              const done = s.order < lead.stage.order;
+              const isCurrent = s.id === lead.stageId;
+              return (
+                <div key={s.id} className="flex-1 min-w-[90px] flex flex-col gap-1">
+                  <div className={cn("h-1.5 rounded-full", done || isCurrent ? "bg-primary" : "bg-border")} />
+                  <span className={cn("text-[11px] whitespace-nowrap truncate", isCurrent ? "font-bold text-text" : "text-text-muted")}>{s.name}</span>
+                </div>
+              );
+            })}
           </div>
+        )}
+
+        {rule ? (
+          <div className="bg-surface/60 border border-border rounded-lg p-4 mb-4">
+            <p className="text-sm font-semibold text-text mb-1">Следующий шаг</p>
+            <p className="text-sm text-text-muted mb-3">{rule.instructionText(stageCtx)}</p>
+            {nextTask && (
+              <p className="text-xs text-text-muted mb-3">
+                Задача: {TASK_TYPE_LABEL[nextTask.type]} — {nextTask.assignedTo.name}, до {formatDate(nextTask.dueAt)}
+              </p>
+            )}
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={handleAdvance}
+                disabled={advancing || !guard?.ok || !roleOk}
+                title={!roleOk ? "Доступно только администратору" : !guard?.ok ? guard?.reason : undefined}
+                className="btn-primary px-4 py-2 text-sm disabled:opacity-50"
+              >
+                {rule.primaryLabel}
+              </button>
+              {rule.secondaryLabel && latestQuoteVersion && (
+                <button onClick={() => openQuoteBuilder(latestQuoteVersion)} className="text-xs text-text-muted hover:text-primary">
+                  {rule.secondaryLabel}
+                </button>
+              )}
+              {!roleOk ? (
+                <span className="text-xs text-amber-700">Доступно только администратору</span>
+              ) : guard && !guard.ok ? (
+                <span className="text-xs text-amber-700">{guard.reason}</span>
+              ) : null}
+            </div>
+          </div>
+        ) : lead.stage.type === "WIN" ? (
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4 text-sm text-green-800 font-medium">
+            Заказ выполнен — оплата подтверждена.
+          </div>
+        ) : (
+          <div className="bg-surface/60 border border-border rounded-lg p-4 mb-4 text-sm text-text-muted">
+            Заказ отменён{lead.lostReason ? `: ${LOST_REASON_LABEL[lead.lostReason]}` : ""}{lead.lostReasonNote ? ` — ${lead.lostReasonNote}` : ""}
+          </div>
+        )}
+
+        <div className="flex items-center gap-6 flex-wrap">
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-muted">Ответственный:</span>
             {isAdmin ? (
@@ -910,19 +991,19 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
               <span className="text-sm text-text">{lead.assignedTo ? lead.assignedTo.name : "не назначено"}</span>
             )}
           </div>
-          {lead.status === "LOST" && lead.lostReason && (
-            <span className="text-xs text-text-muted">
-              Причина: {LOST_REASON_LABEL[lead.lostReason]}{lead.lostReasonNote ? ` — ${lead.lostReasonNote}` : ""}
-            </span>
+          {canCancel && (
+            <button onClick={handleOpenCancel} className="text-xs text-text-muted hover:text-red-600">
+              Отменить заказ
+            </button>
           )}
         </div>
 
-        {lostReasonPromptOpen && (
+        {cancelPromptOpen && (
           <div className="mt-3 pt-3 border-t border-border flex flex-wrap items-center gap-2">
             <span className="text-xs text-text-muted">Причина отказа:</span>
             <select
-              value={lostReasonDraft.reason}
-              onChange={(e) => setLostReasonDraft({ ...lostReasonDraft, reason: e.target.value as LostReason })}
+              value={cancelDraft.reason}
+              onChange={(e) => setCancelDraft({ ...cancelDraft, reason: e.target.value as LostReason })}
               className="input-field text-sm w-auto py-1.5"
             >
               {LOST_REASON_OPTIONS.map((r) => (
@@ -930,15 +1011,15 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
               ))}
             </select>
             <input
-              value={lostReasonDraft.note}
-              onChange={(e) => setLostReasonDraft({ ...lostReasonDraft, note: e.target.value })}
+              value={cancelDraft.note}
+              onChange={(e) => setCancelDraft({ ...cancelDraft, note: e.target.value })}
               placeholder="Комментарий (необязательно)"
               className="input-field text-sm flex-1 min-w-[160px]"
             />
-            <button onClick={handleConfirmLostReason} disabled={saving} className="btn-primary px-3 py-1.5 text-sm disabled:opacity-50">
+            <button onClick={handleConfirmCancel} disabled={advancing} className="btn-primary px-3 py-1.5 text-sm disabled:opacity-50">
               Подтвердить
             </button>
-            <button onClick={() => setLostReasonPromptOpen(false)} className="text-xs text-text-muted hover:text-primary">
+            <button onClick={() => setCancelPromptOpen(false)} className="text-xs text-text-muted hover:text-primary">
               Отмена
             </button>
           </div>
@@ -1175,7 +1256,7 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
                 </>
               )}
               {latestQuoteVersion.status === "ACCEPTED" && !order && (
-                <button onClick={handleCreateOrderFromQuote} className="text-xs text-green-700 font-semibold hover:underline">
+                <button onClick={openOrderPreview} className="text-xs text-green-700 font-semibold hover:underline">
                   Создать заказ из предложения
                 </button>
               )}
@@ -1509,10 +1590,40 @@ export default function LeadDetail({ lead, order, quote, assignableUsers, curren
           <div className="space-y-1">
             {lead.activities.map((a) => (
               <p key={a.id} className="text-xs text-text-muted">
-                {a.field === "status" ? "Статус" : "Ответственный"}: <span className="text-text">{a.oldValue ?? "—"} → {a.newValue ?? "—"}</span>
+                {a.field === "stage" ? "Этап" : "Ответственный"}: <span className="text-text">{a.oldValue ?? "—"} → {a.newValue ?? "—"}</span>
                 {" · "}{a.user.name}, {formatDate(a.createdAt)}
               </p>
             ))}
+          </div>
+        </div>
+      )}
+
+      {orderPreviewOpen && latestQuoteVersion && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-full max-w-lg">
+            <h3 className="font-display font-bold text-lg text-text mb-1">Создать заказ из предложения</h3>
+            <p className="text-xs text-text-muted mb-4">Версия {latestQuoteVersion.versionNumber} · проверьте состав и итог перед созданием заказа</p>
+            <div className="space-y-1.5 mb-4 max-h-64 overflow-y-auto">
+              {latestQuoteVersion.items.map((i) => (
+                <div key={i.id} className="flex items-center justify-between text-sm gap-2 border-b border-border pb-1.5">
+                  <span className="truncate">{i.productName} × {i.quantity}</span>
+                  <span className="whitespace-nowrap font-medium">{formatPrice(i.unitPrice * i.quantity * (1 - i.lineDiscountPercent / 100))}</span>
+                </div>
+              ))}
+            </div>
+            {latestQuoteVersion.discountPercent > 0 && (
+              <p className="text-xs text-text-muted mb-2">Скидка на предложение: {latestQuoteVersion.discountPercent}%{latestQuoteVersion.discountReason ? ` — ${latestQuoteVersion.discountReason}` : ""}</p>
+            )}
+            <div className="flex items-center justify-between text-base font-bold text-text mb-5">
+              <span>Итого</span>
+              <span>{formatPrice(computeQuoteDraftTotal(latestQuoteVersion.items, latestQuoteVersion.discountPercent))}</span>
+            </div>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setOrderPreviewOpen(false)} className="btn-secondary px-5 py-2.5">Отмена</button>
+              <button onClick={confirmCreateOrderFromQuote} disabled={savingOrder} className="btn-primary px-5 py-2.5 disabled:opacity-50">
+                {savingOrder ? "Создаём..." : "Подтвердить и создать заказ"}
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { User, ArrowLeft } from "lucide-react";
-import { formatPrice, cn } from "@/lib/utils";
-import { STATUS_LABEL, STATUS_STYLE } from "@/lib/lead-labels";
+import { formatPrice } from "@/lib/utils";
 import type { Customer } from "@prisma/client";
 import type { LeadWithNotes } from "@/lib/leads-server";
+import StagePill from "@/components/crm/StagePill";
 
 function formatDate(d: Date | string) {
   return new Date(d).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -50,9 +50,7 @@ export default function CustomerDetail({ customer, leads }: { customer: Customer
                   <p className="text-xs text-text-muted">{formatDate(lead.createdAt)}</p>
                 </div>
                 {lead.totalPrice > 0 && <span className="font-semibold text-text">{formatPrice(lead.totalPrice)}</span>}
-                <span className={cn("text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap", STATUS_STYLE[lead.status])}>
-                  {STATUS_LABEL[lead.status]}
-                </span>
+                <StagePill stage={lead.stage} />
               </Link>
             ))}
           </div>

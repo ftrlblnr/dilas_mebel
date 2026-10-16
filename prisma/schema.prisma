@@ -17,17 +17,6 @@ enum LeadSource {
   CUSTOM_ORDER
 }
 
-enum LeadStatus {
-  NEW
-  NEEDS_ASSESSMENT
-  FURNITURE_SELECTION
-  QUOTE_SENT
-  NEGOTIATION
-  AWAITING_PAYMENT
-  WON
-  LOST
-}
-
 enum TaskType {
   CALL
   MEETING
@@ -81,6 +70,12 @@ enum LostReason {
   OTHER
 }
 
+enum StageType {
+  WORK
+  WIN
+  LOSE
+}
+
 model User {
   id                        String         @id @default(cuid())
   email                     String         @unique
@@ -106,6 +101,21 @@ model User {
   quoteVersionApprovals     QuoteVersion[] @relation("QuoteVersionApprover")
 }
 
+model Stage {
+  id        String    @id @default(cuid())
+  key       String    @unique
+  name      String
+  color     String
+  order     Int
+  type      StageType
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  leads     Lead[]
+
+  @@index([order])
+}
+
 model Customer {
   id        String   @id @default(cuid())
   phone     String   @unique
@@ -129,7 +139,8 @@ model Lead {
   preferredTime String?
   itemsJson     String     @default("[]")
   totalPrice    Int        @default(0)
-  status        LeadStatus @default(NEW)
+  stageId       String
+  stage         Stage      @relation(fields: [stageId], references: [id])
   lostReason     LostReason?
   lostReasonNote String?
   customerId    String
@@ -146,7 +157,7 @@ model Lead {
   order         SalesOrder?
   quote         Quote?
 
-  @@index([status])
+  @@index([stageId])
   @@index([createdAt])
   @@index([assignedToId])
   @@index([archivedAt])

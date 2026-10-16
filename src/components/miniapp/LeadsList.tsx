@@ -2,15 +2,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Search, Phone, ShoppingBag, Settings2, ChevronRight, Inbox, X } from "lucide-react";
-import type { LeadStatus, LeadSource } from "@prisma/client";
-import { STATUS_LABEL, STATUS_OPTIONS } from "@/lib/lead-labels";
+import type { LeadSource } from "@prisma/client";
 
 const SOURCE_ICON: Record<LeadSource, typeof Phone> = {
   CALLBACK: ShoppingBag,
   QUICK_CALLBACK: Phone,
   CUSTOM_ORDER: Settings2,
 };
-import type { MiniLead, AssignableUser } from "@/lib/miniapp-types";
+import type { MiniLead, MiniStage, AssignableUser } from "@/lib/miniapp-types";
 import { linkTelegramAccountFromWebApp } from "@/lib/telegram-webapp";
 
 const PAGE_SIZE = 20;
@@ -43,9 +42,10 @@ function SkeletonRow() {
 }
 
 export default function LeadsList({ currentUserId, currentUserRole }: { currentUserId: string; currentUserRole?: string }) {
-  const [status, setStatus] = useState<LeadStatus | "ALL">("ALL");
+  const [stageId, setStageId] = useState<string>("ALL");
   const [assignee, setAssignee] = useState<string>("ALL");
   const [users, setUsers] = useState<AssignableUser[]>([]);
+  const [stages, setStages] = useState<MiniStage[]>([]);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [leads, setLeads] = useState<MiniLead[]>([]);
@@ -57,7 +57,7 @@ export default function LeadsList({ currentUserId, currentUserRole }: { currentU
   const fetchLeads = useCallback(
     async (targetPage: number, replace: boolean) => {
       const params = new URLSearchParams({ page: String(targetPage), pageSize: String(PAGE_SIZE) });
-      if (status !== "ALL") params.set("status", status);
+      if (stageId !== "ALL") params.set("stageId", stageId);
       if (assignee !== "ALL") params.set("assignedToId", assignee);
       if (search.trim()) params.set("search", search.trim());
       if (replace) setLoading(true);
@@ -69,7 +69,7 @@ export default function LeadsList({ currentUserId, currentUserRole }: { currentU
       setLoading(false);
       setLoadingMore(false);
     },
-    [status, assignee, search]
+    [stageId, assignee, search]
   );
 
   useEffect(() => {
@@ -81,6 +81,9 @@ export default function LeadsList({ currentUserId, currentUserRole }: { currentU
     fetch("/api/crm/users/assignable")
       .then((r) => r.json())
       .then(setUsers);
+    fetch("/api/crm/stages")
+      .then((r) => r.json())
+      .then(setStages);
   }, []);
 
   function handleSearchChange(value: string) {
@@ -121,18 +124,18 @@ export default function LeadsList({ currentUserId, currentUserRole }: { currentU
         </div>
         <div className="ma-chips">
           <button
-            className={`ma-chip ${status === "ALL" ? "ma-chip-active" : ""}`}
-            onClick={() => setStatus("ALL")}
+            className={`ma-chip ${stageId === "ALL" ? "ma-chip-active" : ""}`}
+            onClick={() => setStageId("ALL")}
           >
             Все
           </button>
-          {STATUS_OPTIONS.map((s) => (
+          {stages.map((s) => (
             <button
-              key={s}
-              className={`ma-chip ${status === s ? "ma-chip-active" : ""}`}
-              onClick={() => setStatus(s)}
+              key={s.id}
+              className={`ma-chip ${stageId === s.id ? "ma-chip-active" : ""}`}
+              onClick={() => setStageId(s.id)}
             >
-              {STATUS_LABEL[s]}
+              {s.name}
             </button>
           ))}
         </div>
@@ -196,7 +199,12 @@ export default function LeadsList({ currentUserId, currentUserRole }: { currentU
                 <div className="ma-row-body">
                   <div className="flex items-center justify-between gap-2">
                     <span className="ma-row-title truncate">{lead.fullName}</span>
-                    <span className={`ma-badge ma-badge-${lead.status} flex-shrink-0`}>{STATUS_LABEL[lead.status]}</span>
+                    <span
+                      className="ma-badge flex-shrink-0"
+                      style={{ background: `${lead.stage.color}1A`, color: lead.stage.color }}
+                    >
+                      {lead.stage.name}
+                    </span>
                   </div>
                   <div className="ma-row-sub flex items-center justify-between gap-2">
                     <span className="flex items-center gap-1.5">

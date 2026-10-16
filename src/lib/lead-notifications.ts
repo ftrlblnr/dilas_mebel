@@ -44,7 +44,7 @@ export async function notifyNewNoteFromColleague(
 export async function notifyOverdueLeads(): Promise<number> {
   const threshold = new Date(Date.now() - OVERDUE_HOURS * 60 * 60 * 1000);
   const overdueLeads = await prisma.lead.findMany({
-    where: { status: "NEW", archivedAt: null, createdAt: { lte: threshold }, overdueNotifiedAt: null },
+    where: { stage: { key: "NEW" }, archivedAt: null, createdAt: { lte: threshold }, overdueNotifiedAt: null },
     select: { id: true, refNumber: true, fullName: true, phone: true },
   });
   if (overdueLeads.length === 0) return 0;

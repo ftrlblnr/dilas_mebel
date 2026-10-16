@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, Check, ExternalLink, MessageCircle, Phone, ShoppingBag, Settings2 } from "lucide-react";
-import type { LeadStatus, LeadSource, TaskType, PaymentMethod } from "@prisma/client";
-import { STATUS_LABEL, STATUS_OPTIONS, SOURCE_LABEL, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, PREFERRED_TIME_LABEL } from "@/lib/lead-labels";
+import type { LeadSource, TaskType, PaymentMethod } from "@prisma/client";
+import { SOURCE_LABEL, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, PREFERRED_TIME_LABEL } from "@/lib/lead-labels";
 import {
   AGREEMENT_STATUS_LABEL,
   TRANSFER_STATUS_LABEL,
@@ -28,7 +28,7 @@ import {
 import { formatPrice } from "@/lib/utils";
 
 const ACTIVITY_FIELD_LABEL: Record<string, string> = {
-  status: "Статус",
+  stage: "Этап",
   assignedTo: "Ответственный",
 };
 
@@ -136,19 +136,6 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
     }
   }
 
-  async function handleStatusChange(status: LeadStatus) {
-    if (status === lead?.status) return;
-    const res = await fetch(`/api/crm/leads/${leadId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    if (res.ok) {
-      hapticImpact("light");
-      loadLead();
-    }
-  }
-
   async function handleAddTask() {
     if (!taskAssignee || !taskDue || postingTask) return;
     setPostingTask(true);
@@ -232,7 +219,7 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
     <div className="ma-screen pb-10">
       <div className="ma-topbar" style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <span className="ma-row-title">{lead.refNumber}</span>
-        <span className={`ma-badge ma-badge-${lead.status}`}>{STATUS_LABEL[lead.status]}</span>
+        <span className="ma-badge" style={{ background: `${lead.stage.color}1A`, color: lead.stage.color }}>{lead.stage.name}</span>
       </div>
 
       <div className="px-4 pt-4 flex flex-col gap-4">
@@ -332,23 +319,6 @@ export default function LeadDetail({ leadId }: { leadId: string }) {
             </div>
           );
         })()}
-
-        <div className="flex flex-col gap-2">
-          <label className="text-xs font-medium ma-hint">Статус</label>
-          <div className="ma-segment-group">
-            {STATUS_OPTIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={`ma-segment ${lead.status === s ? "ma-segment-active" : ""}`}
-                onClick={() => handleStatusChange(s)}
-              >
-                <span className={`ma-dot ma-dot-${s}`} />
-                {STATUS_LABEL[s]}
-              </button>
-            ))}
-          </div>
-        </div>
 
         <div className="flex flex-col gap-2">
           <label className="text-xs font-medium ma-hint">Ответственный</label>

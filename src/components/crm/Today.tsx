@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { CalendarCheck, AlarmClock, Inbox, ClipboardX, Wallet, PartyPopper } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
-import { STATUS_LABEL } from "@/lib/lead-labels";
 import type { getLeadsWithoutOpenTask, getUnassignedNewLeads, getMyOverdueTasks, getPendingPayments } from "@/lib/today-server";
 
 interface Props {
@@ -82,7 +81,7 @@ export default function Today({ leadsWithoutTask, unassignedNew, overdueTasks, p
 
       <Section icon={<ClipboardX size={16} className="text-amber-600" />} title="Заявки без следующего шага" count={leadsWithoutTask.length} tone="amber">
         {leadsWithoutTask.map((l) => (
-          <Row key={l.id} href={`/crm/leads/${l.id}`} title={`${l.refNumber} — ${l.fullName}`} sub={STATUS_LABEL[l.status]} />
+          <Row key={l.id} href={`/crm/leads/${l.id}`} title={`${l.refNumber} — ${l.fullName}`} sub={l.stage.name} />
         ))}
       </Section>
 

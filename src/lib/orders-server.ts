@@ -3,6 +3,9 @@ import { prisma } from "@/lib/prisma";
 import type { SalesOrder, PaymentMethod, OrderAgreementStatus, TransferStatus, Role, Prisma } from "@prisma/client";
 import { getLeadById, type LeadActor } from "@/lib/leads-server";
 import { getCrmSettings } from "@/lib/crm-settings-server";
+import { computeOrderTotals } from "@/lib/order-totals";
+
+export { computeOrderTotals };
 
 const ORDER_INCLUDE = {
   payments: {
@@ -19,16 +22,6 @@ const ORDER_INCLUDE = {
 } satisfies Prisma.SalesOrderInclude;
 
 export type OrderWithDetails = Prisma.SalesOrderGetPayload<{ include: typeof ORDER_INCLUDE }>;
-
-export function computeOrderTotals(order: { amount: number; payments: { status: string; amount: number; refunds: { amount: number }[] }[] }) {
-  let netReceipts = 0;
-  for (const p of order.payments) {
-    if (p.status !== "CONFIRMED") continue;
-    netReceipts += p.amount;
-    for (const r of p.refunds) netReceipts -= r.amount;
-  }
-  return { netReceipts, remaining: order.amount - netReceipts };
-}
 
 async function assertLeadVisible(leadId: string, actor: LeadActor): Promise<void> {
   const lead = await getLeadById(leadId, actor);
@@ -228,6 +221,6 @@ export async function getOrderForLead(leadId: string, actor: LeadActor): Promise
 }
 
 export async function getAverageWonOrderAmount(): Promise<number | null> {
-  const result = await prisma.salesOrder.aggregate({ _avg: { amount: true }, where: { lead: { status: "WON" } } });
+  const result = await prisma.salesOrder.aggregate({ _avg: { amount: true }, where: { lead: { stage: { type: "WIN" } } } });
   return result._avg.amount !== null ? Math.round(result._avg.amount) : null;
 }

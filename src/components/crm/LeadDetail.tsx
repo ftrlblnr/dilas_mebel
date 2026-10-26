@@ -28,9 +28,6 @@ import type { LeadSource, TaskType, PaymentMethod, LostReason, Stage } from "@pr
 import type { Product } from "@/types";
 import { SOURCE_LABEL, OVERDUE_HOURS, TASK_TYPE_LABEL, TASK_TYPE_OPTIONS, LOST_REASON_LABEL, LOST_REASON_OPTIONS, PREFERRED_TIME_LABEL } from "@/lib/lead-labels";
 import {
-  AGREEMENT_STATUS_LABEL,
-  TRANSFER_STATUS_LABEL,
-  TRANSFER_STATUS_OPTIONS,
   PAYMENT_METHOD_LABEL,
   PAYMENT_METHOD_OPTIONS,
   PAYMENT_STATUS_LABEL,
@@ -1310,7 +1307,6 @@ export default function LeadDetail({ lead, order, quote, allStages, assignableUs
         ) : (
           (() => {
             const { netReceipts, remaining } = computeOrderTotals(order);
-            const canAccept = !order.approvalRequired || !!order.approvedAt;
             return (
               <div className="bg-white border border-border rounded-lg p-3 space-y-3 text-sm">
                 {editingOrder ? (
@@ -1338,7 +1334,7 @@ export default function LeadDetail({ lead, order, quote, allStages, assignableUs
                         скидка {order.discountPercent}%{order.discountReason ? ` — ${order.discountReason}` : ""}
                       </span>
                     )}
-                    {order.agreementStatus === "DRAFT" && (
+                    {lead.stage.key === "AGREEMENT" && (
                       <button onClick={startEditOrder} className="text-text-muted hover:text-primary">
                         <Pencil size={13} />
                       </button>
@@ -1358,42 +1354,6 @@ export default function LeadDetail({ lead, order, quote, allStages, assignableUs
                       ))}
                   </div>
                 )}
-
-                <div className="flex flex-wrap items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-text-muted">Договорённость:</span>
-                    {order.agreementStatus === "DRAFT" && (
-                      <button
-                        onClick={() => handleOrderPatch({ agreementStatus: "ACCEPTED" })}
-                        disabled={savingOrder || !canAccept}
-                        title={!canAccept ? "Требуется согласование скидки" : undefined}
-                        className="text-xs font-semibold px-2 py-1 rounded-full bg-blue-100 text-blue-700 disabled:opacity-50"
-                      >
-                        Принять
-                      </button>
-                    )}
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-surface border border-border text-text-muted">
-                      {AGREEMENT_STATUS_LABEL[order.agreementStatus]}
-                    </span>
-                    {order.agreementStatus !== "CANCELED" && (
-                      <button
-                        onClick={() => handleOrderPatch({ agreementStatus: order.agreementStatus === "ACCEPTED" ? "DRAFT" : "CANCELED" })}
-                        disabled={savingOrder}
-                        className="text-xs text-text-muted hover:text-red-600"
-                      >
-                        {order.agreementStatus === "ACCEPTED" ? "Вернуть в черновик" : "Отменить"}
-                      </button>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-text-muted">Передача:</span>
-                    <select value={order.transferStatus} onChange={(e) => handleOrderPatch({ transferStatus: e.target.value })} className="input-field text-xs w-auto py-1">
-                      {TRANSFER_STATUS_OPTIONS.map((t) => (
-                        <option key={t} value={t}>{TRANSFER_STATUS_LABEL[t]}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
 
                 <div className="flex flex-wrap gap-4 text-xs">
                   <span>Подтверждено: <b className="text-text">{formatPrice(netReceipts)}</b></span>

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getLeadById, advanceLeadStage, cancelLeadStage } from "@/lib/leads-server";
-import { getOrderForLead } from "@/lib/orders-server";
+import { getOrderForLead, setAgreementStatus } from "@/lib/orders-server";
 import { getQuoteForLead } from "@/lib/quotes-server";
 import { getTransitionRule, canCancelStage } from "@/lib/stage-transitions";
 import { getStageByKey } from "@/lib/stages-server";
@@ -52,5 +52,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!toStage) return NextResponse.json({ message: "Целевой этап не найден" }, { status: 500 });
 
   const updated = await advanceLeadStage(id, toStage.id, actor.id);
+
+  // "Договорённость" no longer has a manual control in the UI — reaching "Ожидает
+  // оплату" means terms were agreed, so reflect that on the order automatically.
+  if (rule.toKey === "AWAITING_PAYMENT" && order) {
+    await setAgreementStatus(order.id, "ACCEPTED", actor).catch((err) => console.error("setAgreementStatus failed:", err));
+  }
+
   return NextResponse.json(updated);
 }
